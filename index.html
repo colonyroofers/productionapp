@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Colony Roofers — Large Projects Production</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23E63946'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='Arial' font-weight='800' font-size='16'>CR</text></svg>" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.9/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    input, select, button, textarea { font-family: inherit; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ============================================================
+    // COLONY ROOFERS — LARGE PROJECTS PRODUCTION APP
+    // Single HTML — Phases 1–4: Auth, Dashboard, Docs + AI, Schedule/Gantt, Orders
+    // ============================================================
+
+    // --- Mock Users (In production: Firestore users collection matched by Google email) ---
+    const USERS = [
+      { id: "u1", name: "Zach", email: "zach@colonyroofers.com", role: "admin", initials: "ZC" },
+      { id: "u2", name: "Brayleigh Gardner", email: "brayleigh@colonyroofers.com", role: "coordinator", initials: "BG" },
+      { id: "u3", name: "Lucio Martinez", email: "lucio@colonyroofers.com", role: "superintendent", initials: "LM" },
+      { id: "u4", name: "Derrick Newsome", email: "derrick@colonyroofers.com", role: "superintendent", initials: "DN" },
+    ];
+
+    const MARKETS = ["ATL", "TPA", "DFW"];
+    const MARKET_LABELS = { ATL: "Atlanta", TPA: "Tampa", DFW: "Dallas" };
+    const STATUSES = ["Pre-Construction", "In Progress", "Delayed", "Complete"];
+    const ROOF_TYPES = ["TPO", "Asphalt Shingles", "Single-Ply Membrane", "Modified Bitumen", "Built-Up Roofing"];
+
+    const generateId = () => Math.random().toString(36).substring(2, 10);
+
+    const INITIAL_PROJECTS = [
+      {
+        id: "p1", name: "Preserve at Tampa Palms — Re-Roof", client: "Preserve at Tampa Palms HOA",
+        market: "TPA", status: "In Progress", roofType: "TPO", sqft: 48500,
+        contractValue: 285000, estimatedCost: 199500, estimatedMargin: 30,
+        currentCost: 112000, currentMargin: 60.7, assignedSuper: "u3",
+        address: "15800 Tampa Palms Blvd, Tampa, FL 33647",
+        startDate: "2026-03-01", estCompletion: "2026-04-15", progress: 42,
+        buildings: 19, createdAt: "2026-02-15", documents: {}
+      },
+      {
+        id: "p2", name: "Brookhaven Towers — Flat Roof Replacement", client: "Brookhaven Capital Partners",
+        market: "ATL", status: "Pre-Construction", roofType: "Single-Ply Membrane", sqft: 32000,
+        contractValue: 195000, estimatedCost: 140400, estimatedMargin: 28,
+        currentCost: 0, currentMargin: 28, assignedSuper: "u4",
+        address: "3400 Peachtree Rd NE, Atlanta, GA 30326",
+        startDate: "2026-04-01", estCompletion: "2026-05-10", progress: 0,
+        buildings: 1, createdAt: "2026-03-05", documents: {}
+      },
+      {
+        id: "p3", name: "Legacy Hills Apartments — Full Re-Roof", client: "Greystar Property Mgmt",
+        market: "DFW", status: "In Progress", roofType: "Asphalt Shingles", sqft: 67200,
+        contractValue: 412000, estimatedCost: 288400, estimatedMargin: 30,
+        currentCost: 195000, currentMargin: 52.7, assignedSuper: "u3",
+        address: "2100 Legacy Dr, Plano, TX 75024",
+        startDate: "2026-02-10", estCompletion: "2026-04-20", progress: 68,
+        buildings: 24, createdAt: "2026-01-28", documents: {}
+      },
+      {
+        id: "p4", name: "Midtown 400 — Leak Remediation & Overlay", client: "Cousins Properties",
+        market: "ATL", status: "Delayed", roofType: "Modified Bitumen", sqft: 18500,
+        contractValue: 89000, estimatedCost: 64080, estimatedMargin: 28,
+        currentCost: 58200, currentMargin: 34.6, assignedSuper: "u4",
+        address: "400 17th St NW, Atlanta, GA 30363",
+        startDate: "2026-02-20", estCompletion: "2026-03-25", progress: 75,
+        buildings: 1, createdAt: "2026-02-10", documents: {}
+      },
+      {
+        id: "p5", name: "Channelside Commons — Roof Replacement", client: "ZRS Management",
+        market: "TPA", status: "Complete", roofType: "TPO", sqft: 54000,
+        contractValue: 340000, estimatedCost: 238000, estimatedMargin: 30,
+        currentCost: 231000, currentMargin: 32.1, assignedSuper: "u3",
+        address: "801 Channelside Dr, Tampa, FL 33602",
+        startDate: "2026-01-05", estCompletion: "2026-02-28", progress: 100,
+        buildings: 12, createdAt: "2025-12-20", documents: {}
+      },
+    ];
+
+    // --- Utilities ---
+    const getMarginHealth = (estimated, current) => {
+      const drop = estimated - current;
+      if (drop >= 10) return "critical";
+      if (drop >= 5) return "warning";
+      return "healthy";
+    };
+    const formatCurrency = (val) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
+    const formatDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+    // --- Colors ---
+    const C = {
+      navy: "#1B2A4A", navyLight: "#263B66", navyDark: "#111D35",
+      red: "#E63946", redDark: "#C5303C",
+      white: "#FFFFFF", gray50: "#F8FAFC", gray100: "#F1F5F9", gray200: "#E2E8F0",
+      gray300: "#CBD5E1", gray400: "#94A3B8", gray500: "#64748B", gray600: "#475569", gray700: "#334155",
+      green: "#10B981", greenBg: "#D1FAE5",
+      yellow: "#F59E0B", yellowBg: "#FEF3C7",
+      redBg: "#FEE2E5", blueBg: "#DBEAFE", blue: "#3B82F6",
+    };
+
+    // --- Icons ---
+    const Ic = ({ d, size = 20 }) => (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{typeof d === "string" ? <path d={d} /> : d}</svg>
+    );
+    const I = {
+      plus: <Ic d="M12 5v14M5 12h14" />,
+      search: <Ic d={<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>} />,
+      building: <Ic d={<><path d="M6 22V4a2 2 0 012-2h8a2 2 0 012 2v18"/><path d="M6 12H4a2 2 0 00-2 2v6a2 2 0 002 2h2"/><path d="M18 9h2a2 2 0 012 2v9a2 2 0 01-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></>} />,
+      calendar: <Ic d={<><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>} />,
+      dollar: <Ic d={<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></>} />,
+      alert: <Ic d={<><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>} />,
+      check: <Ic d={<><polyline points="20 6 9 17 4 12"/></>} />,
+      clock: <Ic d={<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>} />,
+      logout: <Ic d={<><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>} />,
+      x: <Ic d={<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>} />,
+      layers: <Ic d={<><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>} />,
+      barChart: <Ic d={<><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></>} />,
+      upload: <Ic d={<><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>} />,
+      file: <Ic d={<><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></>} />,
+      fileText: <Ic d={<><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></>} />,
+      zap: <Ic d={<><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></>} />,
+      trash: <Ic d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></>} />,
+      user: <Ic d={<><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></>} />,
+    };
+
+    // --- Google Logo ---
+    const GoogleLogo = () => (
+      <svg width="20" height="20" viewBox="0 0 48 48">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+    );
+
+    // --- Spinner ---
+    const Spinner = ({ size = 16, color = C.white }) => (
+      <span style={{ display: "inline-block", width: size, height: size, border: `2px solid ${color}40`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+    );
+
+    // ============================================================
+    // SMALL COMPONENTS
+    // ============================================================
+    function StatusBadge({ status }) {
+      const cfg = {
+        "Pre-Construction": { bg: C.blueBg, color: C.blue },
+        "In Progress": { bg: C.greenBg, color: C.green },
+        "Delayed": { bg: C.yellowBg, color: C.yellow },
+        "Complete": { bg: "#E0E7FF", color: "#6366F1" },
+      };
+      const c = cfg[status] || cfg["Pre-Construction"];
+      return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 6, background: c.bg, color: c.color, fontSize: 12, fontWeight: 600 }}>{status}</span>;
+    }
+
+    function MarginBadge({ estimated, current }) {
+      const health = getMarginHealth(estimated, current);
+      const cfg = { healthy: { bg: C.greenBg, color: C.green, label: "Healthy" }, warning: { bg: C.yellowBg, color: C.yellow, label: "Watch" }, critical: { bg: C.redBg, color: C.red, label: "Critical" } };
+      const c = cfg[health];
+      return <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 5, background: c.bg, color: c.color, fontSize: 11, fontWeight: 700 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: c.color }} />{c.label}</span>;
+    }
+
+    function MarketTag({ market }) {
+      const cfg = { ATL: { bg: "#EDE9FE", color: "#7C3AED" }, TPA: { bg: "#FEF3C7", color: "#D97706" }, DFW: { bg: "#DBEAFE", color: "#2563EB" } };
+      const c = cfg[market] || cfg.ATL;
+      return <span style={{ padding: "3px 8px", borderRadius: 5, background: c.bg, color: c.color, fontSize: 11, fontWeight: 700, letterSpacing: "0.05em" }}>{market}</span>;
+    }
+
+    function ProgressBar({ value, color = C.green }) {
+      return (
+        <div style={{ height: 6, borderRadius: 3, background: C.gray200, overflow: "hidden", width: "100%" }}>
+          <div style={{ height: "100%", borderRadius: 3, background: color, width: `${Math.min(value, 100)}%`, transition: "width 0.6s cubic-bezier(0.16,1,0.3,1)" }} />
+        </div>
+      );
+    }
+
+    function StatCard({ label, value, sub, icon, accent = C.navy }) {
+      return (
+        <div style={{ background: C.white, borderRadius: 12, padding: "20px 22px", border: `1px solid ${C.gray200}`, position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: accent, borderRadius: "3px 0 0 3px" }} />
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div>
+              <p style={{ fontSize: 12, color: C.gray500, fontWeight: 600, margin: 0, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>
+              <p style={{ fontSize: 28, fontWeight: 800, color: C.navy, margin: "6px 0 0", letterSpacing: "-0.02em" }}>{value}</p>
+              {sub && <p style={{ fontSize: 12, color: C.gray500, margin: "4px 0 0" }}>{sub}</p>}
+            </div>
+            <div style={{ color: accent, opacity: 0.5 }}>{icon}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // LOGIN SCREEN
+    // ============================================================
+    function LoginScreen({ onLogin }) {
+      const [animIn, setAnimIn] = useState(false);
+      const [signingIn, setSigningIn] = useState(false);
+      const [showDemo, setShowDemo] = useState(false);
+
+      useEffect(() => { setTimeout(() => setAnimIn(true), 100); }, []);
+
+      const handleGoogleSignIn = (demoUser) => {
+        setSigningIn(true);
+        setTimeout(() => { onLogin(demoUser || USERS[0]); }, 800);
+      };
+
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.navyDark} 0%, ${C.navy} 50%, ${C.navyLight} 100%)` }}>
+          <div style={{ position: "fixed", inset: 0, opacity: 0.03, backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 35px, #fff 35px, #fff 36px)` }} />
+          <div style={{ width: 420, padding: "48px 40px", borderRadius: 16, background: C.white, boxShadow: "0 25px 60px rgba(0,0,0,0.3)", transform: animIn ? "translateY(0)" : "translateY(20px)", opacity: animIn ? 1 : 0, transition: "all 0.6s cubic-bezier(0.16,1,0.3,1)", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: C.red }} />
+            <div style={{ textAlign: "center", marginBottom: 40 }}>
+              <div style={{ width: 72, height: 72, borderRadius: 18, margin: "0 auto 22px", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 8px 24px ${C.navy}40` }}>
+                <span style={{ color: C.white, fontSize: 30, fontWeight: 800 }}>CR</span>
+              </div>
+              <h1 style={{ fontSize: 24, fontWeight: 700, color: C.navy, margin: 0 }}>Colony Roofers</h1>
+              <p style={{ fontSize: 13, color: C.gray500, margin: "6px 0 0", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em" }}>Large Projects Production</p>
+            </div>
+            <p style={{ fontSize: 14, color: C.gray600, marginBottom: 20, textAlign: "center" }}>Sign in with your Colony Roofers Google account to continue.</p>
+            <button onClick={() => handleGoogleSignIn()} disabled={signingIn} style={{ width: "100%", padding: "14px 0", border: `1px solid ${C.gray300}`, borderRadius: 10, background: C.white, cursor: signingIn ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, transition: "all 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.08)", fontSize: 15, fontWeight: 600, color: C.gray700 }}>
+              {signingIn ? <Spinner size={20} color={C.navy} /> : <GoogleLogo />}
+              {signingIn ? "Signing in..." : "Sign in with Google"}
+            </button>
+            <div style={{ marginTop: 28, paddingTop: 20, borderTop: `1px solid ${C.gray100}`, textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: C.gray400, margin: 0 }}>Access is restricted to authorized Colony Roofers team members.</p>
+            </div>
+            {/* Demo role switcher */}
+            <div style={{ marginTop: 20, borderTop: `1px dashed ${C.gray200}`, paddingTop: 14 }}>
+              <button onClick={() => setShowDemo(!showDemo)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: C.gray400, width: "100%", textAlign: "center" }}>
+                Demo mode: Test different roles {showDemo ? "▲" : "▼"}
+              </button>
+              {showDemo && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                  {USERS.map(u => (
+                    <button key={u.id} onClick={() => handleGoogleSignIn(u)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", border: `1px solid ${C.gray200}`, borderRadius: 8, background: C.gray50, cursor: "pointer", textAlign: "left", width: "100%" }}>
+                      <div style={{ width: 30, height: 30, borderRadius: 7, background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, display: "flex", alignItems: "center", justifyContent: "center", color: C.white, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{u.initials}</div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>{u.name}</div>
+                        <div style={{ fontSize: 10, color: C.gray500, textTransform: "capitalize" }}>{u.role === "coordinator" ? "Production Coordinator" : u.role}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // CREATE PROJECT MODAL
+    // ============================================================
+    function CreateProjectModal({ onClose, onCreate, supers }) {
+      const [form, setForm] = useState({ name: "", client: "", market: "ATL", address: "", roofType: "TPO", sqft: "", contractValue: "", estimatedCost: "", assignedSuper: supers[0]?.id || "", startDate: "", estCompletion: "", buildings: "1" });
+      const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+      const estimatedMargin = form.contractValue && form.estimatedCost ? Math.round(((form.contractValue - form.estimatedCost) / form.contractValue) * 100) : null;
+      const canSubmit = form.name && form.client && form.contractValue && form.estimatedCost && form.startDate;
+      const fs = { width: "100%", padding: "10px 12px", border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, color: C.navy, outline: "none", boxSizing: "border-box" };
+      const ls = { fontSize: 12, fontWeight: 600, color: C.gray600, marginBottom: 4, display: "block" };
+
+      const handleSubmit = () => {
+        if (!canSubmit) return;
+        onCreate({ id: generateId(), ...form, sqft: Number(form.sqft) || 0, contractValue: Number(form.contractValue), estimatedCost: Number(form.estimatedCost), estimatedMargin: estimatedMargin || 0, currentCost: 0, currentMargin: estimatedMargin || 0, status: "Pre-Construction", progress: 0, buildings: Number(form.buildings) || 1, createdAt: new Date().toISOString().split("T")[0], documents: {} });
+      };
+
+      return (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(17,29,53,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose}>
+          <div style={{ background: C.white, borderRadius: 16, width: 560, maxHeight: "90vh", overflow: "auto", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "24px 28px 20px", borderBottom: `1px solid ${C.gray200}`, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: C.white, zIndex: 1, borderRadius: "16px 16px 0 0" }}>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: C.navy, margin: 0 }}>New Project</h2>
+                <p style={{ fontSize: 13, color: C.gray500, margin: "2px 0 0" }}>Add a large project to the production pipeline</p>
+              </div>
+              <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400, padding: 4 }}>{I.x}</button>
+            </div>
+            <div style={{ padding: "24px 28px 28px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 20px" }}>
+                <div style={{ gridColumn: "1/-1" }}><label style={ls}>Project Name *</label><input style={fs} placeholder="e.g. Preserve at Tampa Palms — Re-Roof" value={form.name} onChange={e => update("name", e.target.value)} /></div>
+                <div style={{ gridColumn: "1/-1" }}><label style={ls}>Client *</label><input style={fs} placeholder="Property owner or management company" value={form.client} onChange={e => update("client", e.target.value)} /></div>
+                <div style={{ gridColumn: "1/-1" }}><label style={ls}>Address</label><input style={fs} placeholder="Full project address" value={form.address} onChange={e => update("address", e.target.value)} /></div>
+                <div><label style={ls}>Market</label><select style={fs} value={form.market} onChange={e => update("market", e.target.value)}>{MARKETS.map(m => <option key={m} value={m}>{MARKET_LABELS[m]}</option>)}</select></div>
+                <div><label style={ls}>Roof Type</label><select style={fs} value={form.roofType} onChange={e => update("roofType", e.target.value)}>{ROOF_TYPES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+                <div><label style={ls}>Square Footage</label><input style={fs} type="number" placeholder="0" value={form.sqft} onChange={e => update("sqft", e.target.value)} /></div>
+                <div><label style={ls}>Building Count</label><input style={fs} type="number" placeholder="1" value={form.buildings} onChange={e => update("buildings", e.target.value)} /></div>
+                <div><label style={ls}>Contract Value *</label><input style={fs} type="number" placeholder="0" value={form.contractValue} onChange={e => update("contractValue", e.target.value)} /></div>
+                <div><label style={ls}>Estimated Cost *</label><input style={fs} type="number" placeholder="0" value={form.estimatedCost} onChange={e => update("estimatedCost", e.target.value)} /></div>
+                {estimatedMargin !== null && (
+                  <div style={{ gridColumn: "1/-1", padding: "12px 16px", borderRadius: 8, background: estimatedMargin >= 25 ? C.greenBg : estimatedMargin >= 15 ? C.yellowBg : C.redBg }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: estimatedMargin >= 25 ? C.green : estimatedMargin >= 15 ? C.yellow : C.red }}>Estimated Profit Margin: {estimatedMargin}%</span>
+                  </div>
+                )}
+                <div><label style={ls}>Start Date *</label><input style={fs} type="date" value={form.startDate} onChange={e => update("startDate", e.target.value)} /></div>
+                <div><label style={ls}>Est. Completion</label><input style={fs} type="date" value={form.estCompletion} onChange={e => update("estCompletion", e.target.value)} /></div>
+                <div style={{ gridColumn: "1/-1" }}><label style={ls}>Assigned Superintendent</label><select style={fs} value={form.assignedSuper} onChange={e => update("assignedSuper", e.target.value)}>{supers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+              </div>
+              <div style={{ display: "flex", gap: 12, marginTop: 28, justifyContent: "flex-end" }}>
+                <button onClick={onClose} style={{ padding: "10px 20px", borderRadius: 8, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                <button onClick={handleSubmit} disabled={!canSubmit} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: canSubmit ? C.red : C.gray300, color: canSubmit ? C.white : C.gray400, fontSize: 14, fontWeight: 600, cursor: canSubmit ? "pointer" : "default", boxShadow: canSubmit ? `0 4px 12px ${C.red}30` : "none" }}>Create Project</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // DOCUMENT UPLOAD CARD
+    // ============================================================
+    const DOC_TYPES = {
+      budget: { label: "Job Budget", desc: "Line-item cost breakdown & profit margin", icon: I.dollar, accept: ".pdf,.xlsx,.xls,.csv" },
+      contract: { label: "Contract", desc: "Scope, terms, and contract value", icon: I.fileText, accept: ".pdf,.docx,.doc" },
+      plannedSet: { label: "Planned Set", desc: "Architectural drawings & blueprints", icon: I.layers, accept: ".pdf,.png,.jpg,.jpeg" },
+    };
+
+    function DocumentUploadCard({ type, doc, onUpload, onRemove }) {
+      const config = DOC_TYPES[type];
+      const inputRef = useRef(null);
+      const [dragOver, setDragOver] = useState(false);
+      const handleFiles = (files) => { if (files && files.length > 0) onUpload(type, files[0]); };
+      const handleDrop = (e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); };
+      const statusColor = !doc ? C.gray400 : doc.status === "parsed" ? C.green : doc.status === "processing" ? C.blue : doc.status === "error" ? C.red : C.navy;
+      const statusLabel = !doc ? "Not uploaded" : doc.status === "parsed" ? "Parsed" : doc.status === "processing" ? "Processing..." : doc.status === "error" ? "Error" : "Uploaded";
+
+      return (
+        <div style={{ border: `2px ${dragOver ? "solid" : "dashed"} ${dragOver ? C.red : doc ? C.gray200 : C.gray300}`, borderRadius: 12, background: dragOver ? C.redBg + "30" : C.white, transition: "all 0.2s", overflow: "hidden" }}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
+          <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: doc ? `1px solid ${C.gray100}` : "none", background: doc ? C.gray50 : "transparent" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: doc?.status === "parsed" ? C.greenBg : doc ? C.blueBg : C.gray100, color: doc?.status === "parsed" ? C.green : doc ? C.blue : C.gray400 }}>{config.icon}</div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>{config.label}</div>
+                <div style={{ fontSize: 11, color: C.gray500 }}>{config.desc}</div>
+              </div>
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: statusColor, padding: "3px 8px", borderRadius: 5, background: !doc ? C.gray100 : doc.status === "parsed" ? C.greenBg : doc.status === "processing" ? C.blueBg : doc.status === "error" ? C.redBg : C.gray100 }}>
+              {doc?.status === "processing" && <Spinner size={8} color={C.blue} />} {statusLabel}
+            </span>
+          </div>
+          {!doc ? (
+            <div style={{ padding: "28px 18px", textAlign: "center", cursor: "pointer" }} onClick={() => inputRef.current?.click()}>
+              <div style={{ color: C.gray300, marginBottom: 8 }}>{I.upload}</div>
+              <p style={{ fontSize: 13, color: C.gray500, margin: "0 0 4px", fontWeight: 500 }}>Drag & drop or <span style={{ color: C.red, fontWeight: 600 }}>browse</span></p>
+              <p style={{ fontSize: 11, color: C.gray400, margin: 0 }}>Accepts: {config.accept.replace(/\./g, "").toUpperCase().split(",").join(", ")}</p>
+              <input ref={inputRef} type="file" accept={config.accept} style={{ display: "none" }} onChange={e => handleFiles(e.target.files)} />
+            </div>
+          ) : (
+            <div style={{ padding: "12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: C.gray400 }}>{I.file}</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: C.navy }}>{doc.name}</div>
+                  <div style={{ fontSize: 11, color: C.gray400 }}>{(doc.size / 1024).toFixed(0)} KB</div>
+                </div>
+              </div>
+              {doc.status !== "processing" && <button onClick={() => onRemove(type)} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400, padding: 4 }}>{I.trash}</button>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // AI EXTRACTION RESULTS
+    // ============================================================
+    function ExtractionResults({ data, onApply }) {
+      if (!data) return null;
+      const Sec = ({ title, children }) => <div style={{ marginBottom: 16 }}><h4 style={{ fontSize: 11, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 8px" }}>{title}</h4>{children}</div>;
+      const Row = ({ label, value, highlight }) => <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${C.gray100}` }}><span style={{ fontSize: 13, color: C.gray500 }}>{label}</span><span style={{ fontSize: 13, fontWeight: 600, color: highlight || C.navy }}>{value || "—"}</span></div>;
+
+      return (
+        <div style={{ border: `1px solid ${C.green}40`, borderRadius: 12, overflow: "hidden", background: C.white }}>
+          <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", background: C.greenBg, borderBottom: `1px solid ${C.green}30` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: C.green }}>{I.zap}</span><span style={{ fontSize: 14, fontWeight: 700, color: C.green }}>AI Extraction Complete</span></div>
+            <button onClick={onApply} style={{ padding: "7px 16px", borderRadius: 7, border: "none", background: C.green, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Apply to Project</button>
+          </div>
+          <div style={{ padding: "16px 18px" }}>
+            {data.contract && <Sec title="Contract Details">
+              <Row label="Contract Value" value={data.contract.value ? formatCurrency(data.contract.value) : null} highlight={C.green} />
+              <Row label="Scope Summary" value={data.contract.scopeSummary} />
+              <Row label="Start Date" value={data.contract.startDate} />
+              <Row label="Duration" value={data.contract.duration} />
+            </Sec>}
+            {data.budget && <Sec title="Budget Breakdown">
+              <Row label="Total Estimated Cost" value={data.budget.totalCost ? formatCurrency(data.budget.totalCost) : null} />
+              <Row label="Material Cost" value={data.budget.materialCost ? formatCurrency(data.budget.materialCost) : null} />
+              <Row label="Labor Cost" value={data.budget.laborCost ? formatCurrency(data.budget.laborCost) : null} />
+              <Row label="Equipment & Other" value={data.budget.otherCost ? formatCurrency(data.budget.otherCost) : null} />
+              <Row label="Estimated Margin" value={data.budget.estimatedMargin ? `${data.budget.estimatedMargin}%` : null} highlight={data.budget.estimatedMargin >= 25 ? C.green : data.budget.estimatedMargin >= 15 ? C.yellow : C.red} />
+              {data.budget.lineItems && data.budget.lineItems.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <p style={{ fontSize: 11, fontWeight: 600, color: C.gray500, margin: "0 0 6px" }}>Line Items ({data.budget.lineItems.length})</p>
+                  <div style={{ maxHeight: 180, overflowY: "auto", borderRadius: 6, border: `1px solid ${C.gray200}` }}>
+                    {data.budget.lineItems.map((item, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", background: i % 2 === 0 ? C.gray50 : C.white, fontSize: 12 }}><span style={{ color: C.gray600 }}>{item.description}</span><span style={{ fontWeight: 600, color: C.navy }}>{formatCurrency(item.amount)}</span></div>)}
+                  </div>
+                </div>
+              )}
+            </Sec>}
+            {data.specs && <Sec title="Specifications">
+              <Row label="Roof Type" value={data.specs.roofType} />
+              <Row label="Total Sq Ft" value={data.specs.sqft ? data.specs.sqft.toLocaleString() + " sq ft" : null} />
+              <Row label="Building Count" value={data.specs.buildingCount} />
+              <Row label="Primary Material" value={data.specs.primaryMaterial} />
+              <Row label="Layers / System" value={data.specs.system} />
+            </Sec>}
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // DOCUMENTS TAB
+    // ============================================================
+    function DocumentsTab({ project, onUpdateProject }) {
+      const [docs, setDocs] = useState(project.documents || {});
+      const [extractionData, setExtractionData] = useState(null);
+      const [processing, setProcessing] = useState(false);
+      const [error, setError] = useState(null);
+
+      const handleUpload = (type, file) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setDocs(prev => ({ ...prev, [type]: { name: file.name, size: file.size, type: file.type, status: "uploaded", data: e.target.result, uploadedAt: new Date().toISOString() } }));
+          setExtractionData(null);
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const handleRemove = (type) => { setDocs(prev => { const next = { ...prev }; delete next[type]; return next; }); setExtractionData(null); };
+      const uploadedCount = Object.keys(docs).filter(k => docs[k]).length;
+      const canProcess = uploadedCount >= 1;
+
+      const handleAIProcess = async () => {
+        setProcessing(true); setError(null);
+        setDocs(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k]) next[k] = { ...next[k], status: "processing" }; }); return next; });
+        try {
+          const contentParts = [];
+          Object.entries(docs).forEach(([type, doc]) => {
+            if (!doc) return;
+            const label = DOC_TYPES[type]?.label || type;
+            const base64Data = doc.data.split(",")[1];
+            const mediaType = doc.type || "application/pdf";
+            if (mediaType.startsWith("image/")) {
+              contentParts.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } });
+            } else if (mediaType === "application/pdf") {
+              contentParts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Data } });
+            }
+            contentParts.push({ type: "text", text: `[The above file is the ${label}: "${doc.name}"]` });
+          });
+          contentParts.push({ type: "text", text: `You are an AI assistant for Colony Roofers, a GAF President's Club roofing contractor. Analyze the uploaded documents and extract all relevant data.\n\nReturn ONLY valid JSON (no markdown fences) with this structure:\n{"contract":{"value":null,"scopeSummary":"","startDate":null,"duration":null},"budget":{"totalCost":null,"materialCost":null,"laborCost":null,"otherCost":null,"estimatedMargin":null,"lineItems":[]},"specs":{"roofType":null,"sqft":null,"buildingCount":null,"primaryMaterial":null,"system":null}}\n\nExtract what you can. Use null for unknown fields. Calculate estimatedMargin as ((contractValue - totalCost) / contractValue * 100) if both available.` });
+
+          const response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: contentParts }] }),
+          });
+          const result = await response.json();
+          const textContent = result.content?.find(c => c.type === "text")?.text || "";
+          const parsed = JSON.parse(textContent.replace(/```json|```/g, "").trim());
+          setExtractionData(parsed);
+          setDocs(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k]) next[k] = { ...next[k], status: "parsed" }; }); return next; });
+        } catch (err) {
+          console.error("AI processing error:", err);
+          setError("AI processing failed. Please check your documents and try again.");
+          setDocs(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k]) next[k] = { ...next[k], status: "error" }; }); return next; });
+        } finally { setProcessing(false); }
+      };
+
+      const handleApply = () => {
+        if (!extractionData) return;
+        const u = { documents: docs };
+        if (extractionData.contract?.value) u.contractValue = extractionData.contract.value;
+        if (extractionData.budget?.totalCost) u.estimatedCost = extractionData.budget.totalCost;
+        if (extractionData.budget?.estimatedMargin) { u.estimatedMargin = extractionData.budget.estimatedMargin; u.currentMargin = extractionData.budget.estimatedMargin; }
+        if (extractionData.specs?.roofType) u.roofType = extractionData.specs.roofType;
+        if (extractionData.specs?.sqft) u.sqft = extractionData.specs.sqft;
+        if (extractionData.specs?.buildingCount) u.buildings = extractionData.specs.buildingCount;
+        if (extractionData.contract?.startDate) u.startDate = extractionData.contract.startDate;
+        onUpdateProject(u);
+      };
+
+      return (
+        <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
+            {Object.entries(DOC_TYPES).map(([type]) => <DocumentUploadCard key={type} type={type} doc={docs[type]} onUpload={handleUpload} onRemove={handleRemove} />)}
+          </div>
+          <div style={{ marginBottom: 24 }}>
+            <button onClick={handleAIProcess} disabled={!canProcess || processing} style={{ width: "100%", padding: "14px 0", borderRadius: 10, border: "none", background: canProcess && !processing ? `linear-gradient(135deg, ${C.navy}, ${C.navyLight})` : C.gray200, color: canProcess && !processing ? C.white : C.gray400, fontSize: 14, fontWeight: 600, cursor: canProcess && !processing ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: canProcess && !processing ? `0 4px 16px ${C.navy}30` : "none" }}>
+              {processing ? <><Spinner size={16} /> Processing with AI...</> : <>{I.zap} Process Documents with AI</>}
+            </button>
+            <p style={{ fontSize: 11, color: C.gray400, textAlign: "center", marginTop: 6 }}>{uploadedCount}/3 documents uploaded{uploadedCount < 3 && " — upload more for better extraction"}</p>
+          </div>
+          {error && <div style={{ padding: "12px 16px", borderRadius: 8, background: C.redBg, marginBottom: 20, display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: C.red }}>{I.alert}</span><span style={{ fontSize: 13, color: C.red, fontWeight: 500 }}>{error}</span></div>}
+          <ExtractionResults data={extractionData} onApply={handleApply} />
+        </div>
+      );
+    }
+
+    // ============================================================
+    // SCHEDULE / GANTT CHART (Phase 3)
+    // ============================================================
+    const DEFAULT_PHASES = [
+      { id: "mob", name: "Mobilization / Setup", color: "#6366F1", daysOffset: 0, durationDays: 2 },
+      { id: "tear", name: "Tear-Off", color: "#EF4444", daysOffset: 2, durationDays: 5 },
+      { id: "dry", name: "Dry-In", color: "#F59E0B", daysOffset: 7, durationDays: 3 },
+      { id: "inst", name: "Installation", color: "#10B981", daysOffset: 10, durationDays: 10 },
+      { id: "detail", name: "Detail Work / Flashing", color: "#3B82F6", daysOffset: 20, durationDays: 4 },
+      { id: "clean", name: "Cleanup & Final Inspection", color: "#8B5CF6", daysOffset: 24, durationDays: 2 },
+    ];
+
+    const DELAY_REASONS = ["Weather", "Material Backorder", "Labor Shortage", "Access Issue", "Permit Delay", "Other"];
+
+    function addDays(dateStr, days) {
+      const d = new Date(dateStr + "T00:00:00");
+      d.setDate(d.getDate() + days);
+      return d.toISOString().split("T")[0];
+    }
+    function daysBetween(a, b) {
+      return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+    }
+    function fmtShort(dateStr) {
+      return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+
+    function GanttChart({ phases, projectStart, projectEnd, onPhaseClick }) {
+      const totalDays = Math.max(daysBetween(projectStart, projectEnd), 7);
+      const today = new Date().toISOString().split("T")[0];
+      const todayOffset = daysBetween(projectStart, today);
+
+      // Generate week markers
+      const weeks = [];
+      for (let d = 0; d <= totalDays; d += 7) {
+        weeks.push({ day: d, label: fmtShort(addDays(projectStart, d)) });
+      }
+
+      return (
+        <div style={{ overflowX: "auto", borderRadius: 10, border: `1px solid ${C.gray200}`, background: C.white }}>
+          <div style={{ minWidth: Math.max(totalDays * 14 + 200, 500) }}>
+            {/* Header row with week markers */}
+            <div style={{ display: "flex", borderBottom: `1px solid ${C.gray200}`, position: "sticky", top: 0, background: C.gray50, zIndex: 2 }}>
+              <div style={{ width: 200, minWidth: 200, padding: "10px 14px", fontSize: 11, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.06em", borderRight: `1px solid ${C.gray200}` }}>Phase</div>
+              <div style={{ flex: 1, position: "relative", height: 36 }}>
+                {weeks.map((w, i) => (
+                  <div key={i} style={{ position: "absolute", left: w.day * 14, top: 0, bottom: 0, borderLeft: `1px solid ${C.gray200}`, padding: "10px 6px", fontSize: 10, fontWeight: 600, color: C.gray400, whiteSpace: "nowrap" }}>{w.label}</div>
+                ))}
+              </div>
+            </div>
+
+            {/* Phase rows */}
+            {phases.map((phase, idx) => {
+              const startOffset = daysBetween(projectStart, phase.startDate);
+              const duration = daysBetween(phase.startDate, phase.endDate);
+              const barLeft = startOffset * 14;
+              const barWidth = Math.max(duration * 14, 14);
+              const pct = phase.progress || 0;
+
+              return (
+                <div key={phase.id} onClick={() => onPhaseClick && onPhaseClick(phase)}
+                  style={{ display: "flex", borderBottom: `1px solid ${C.gray100}`, cursor: "pointer", transition: "background 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = C.gray50}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div style={{ width: 200, minWidth: 200, padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, borderRight: `1px solid ${C.gray200}` }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: phase.color, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.navy, lineHeight: 1.2 }}>{phase.name}</div>
+                      <div style={{ fontSize: 10, color: C.gray400 }}>{fmtShort(phase.startDate)} – {fmtShort(phase.endDate)}</div>
+                    </div>
+                  </div>
+                  <div style={{ flex: 1, position: "relative", padding: "8px 0", minHeight: 48 }}>
+                    {/* Grid lines */}
+                    {weeks.map((w, i) => <div key={i} style={{ position: "absolute", left: w.day * 14, top: 0, bottom: 0, borderLeft: `1px solid ${C.gray100}` }} />)}
+                    {/* Today marker */}
+                    {todayOffset >= 0 && todayOffset <= totalDays && (
+                      <div style={{ position: "absolute", left: todayOffset * 14, top: 0, bottom: 0, width: 2, background: C.red + "60", zIndex: 1 }} />
+                    )}
+                    {/* Phase bar */}
+                    <div style={{ position: "absolute", left: barLeft, top: 10, height: 28, width: barWidth, borderRadius: 6, background: phase.color + "20", border: `1px solid ${phase.color}40`, overflow: "hidden", display: "flex", alignItems: "center" }}>
+                      <div style={{ height: "100%", width: `${pct}%`, background: phase.color + "50", borderRadius: "5px 0 0 5px", transition: "width 0.3s" }} />
+                      <span style={{ position: "absolute", left: 8, fontSize: 10, fontWeight: 700, color: phase.color, zIndex: 1 }}>{pct}%</span>
+                      {phase.delay && <span style={{ position: "absolute", right: 6, fontSize: 9, background: C.yellowBg, color: C.yellow, padding: "1px 5px", borderRadius: 3, fontWeight: 700 }}>⚠</span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Today legend */}
+            <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 12, borderTop: `1px solid ${C.gray200}`, background: C.gray50 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 12, height: 2, background: C.red + "60" }} /><span style={{ fontSize: 10, color: C.gray400 }}>Today</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 12, height: 8, borderRadius: 2, background: C.green + "50" }} /><span style={{ fontSize: 10, color: C.gray400 }}>Progress</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ fontSize: 10, background: C.yellowBg, color: C.yellow, padding: "0 4px", borderRadius: 2, fontWeight: 700 }}>⚠</span><span style={{ fontSize: 10, color: C.gray400 }}>Delay</span></div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Phase Edit Modal
+    function PhaseEditModal({ phase, onSave, onClose, onDelete }) {
+      const [form, setForm] = useState({ ...phase });
+      const [showDelay, setShowDelay] = useState(!!phase.delay);
+      const fs = { width: "100%", padding: "10px 12px", border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, color: C.navy, outline: "none", boxSizing: "border-box" };
+      const ls = { fontSize: 12, fontWeight: 600, color: C.gray600, marginBottom: 4, display: "block" };
+
+      return (
+        <div style={{ position: "fixed", inset: 0, zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(17,29,53,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose}>
+          <div style={{ background: C.white, borderRadius: 14, width: 420, maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${C.gray200}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 12, height: 12, borderRadius: 3, background: form.color }} />
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: C.navy, margin: 0 }}>Edit Phase</h3>
+              </div>
+              <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400 }}>{I.x}</button>
+            </div>
+            <div style={{ padding: "20px 24px 24px" }}>
+              <div style={{ display: "grid", gap: 14 }}>
+                <div><label style={ls}>Phase Name</label><input style={fs} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div><label style={ls}>Start Date</label><input style={fs} type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} /></div>
+                  <div><label style={ls}>End Date</label><input style={fs} type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></div>
+                </div>
+                <div><label style={ls}>Progress (%)</label><input style={fs} type="number" min="0" max="100" value={form.progress || 0} onChange={e => setForm(f => ({ ...f, progress: Math.min(100, Math.max(0, Number(e.target.value))) }))} /></div>
+
+                {/* Delay section */}
+                <div style={{ borderTop: `1px solid ${C.gray200}`, paddingTop: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showDelay ? 12 : 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: C.gray600 }}>Report a Delay</span>
+                    <button onClick={() => { setShowDelay(!showDelay); if (showDelay) setForm(f => ({ ...f, delay: null })); }}
+                      style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${showDelay ? C.red : C.gray300}`, background: showDelay ? C.redBg : C.white, color: showDelay ? C.red : C.gray500, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                      {showDelay ? "Remove Delay" : "Add Delay"}
+                    </button>
+                  </div>
+                  {showDelay && (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <div>
+                        <label style={ls}>Reason</label>
+                        <select style={fs} value={form.delay?.reason || ""} onChange={e => setForm(f => ({ ...f, delay: { ...(f.delay || {}), reason: e.target.value, date: f.delay?.date || new Date().toISOString().split("T")[0] } }))}>
+                          <option value="">Select reason...</option>
+                          {DELAY_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={ls}>Notes</label>
+                        <textarea style={{ ...fs, minHeight: 60, resize: "vertical" }} value={form.delay?.notes || ""} placeholder="Additional details about the delay..."
+                          onChange={e => setForm(f => ({ ...f, delay: { ...(f.delay || {}), notes: e.target.value } }))} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 24, justifyContent: "space-between" }}>
+                <button onClick={() => onDelete(form.id)} style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${C.red}40`, background: C.redBg, color: C.red, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{I.trash} Delete</button>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={onClose} style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                  <button onClick={() => onSave(form)} style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: C.red, color: C.white, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: `0 2px 8px ${C.red}30` }}>Save Changes</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Add Phase Modal
+    function AddPhaseModal({ onAdd, onClose, existingPhases }) {
+      const lastPhase = existingPhases[existingPhases.length - 1];
+      const defaultStart = lastPhase ? addDays(lastPhase.endDate, 1) : new Date().toISOString().split("T")[0];
+      const [form, setForm] = useState({ name: "", startDate: defaultStart, endDate: addDays(defaultStart, 3), color: "#6366F1", progress: 0 });
+      const fs = { width: "100%", padding: "10px 12px", border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, color: C.navy, outline: "none", boxSizing: "border-box" };
+      const ls = { fontSize: 12, fontWeight: 600, color: C.gray600, marginBottom: 4, display: "block" };
+      const phaseColors = ["#6366F1", "#EF4444", "#F59E0B", "#10B981", "#3B82F6", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"];
+
+      return (
+        <div style={{ position: "fixed", inset: 0, zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(17,29,53,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose}>
+          <div style={{ background: C.white, borderRadius: 14, width: 400, boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${C.gray200}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: C.navy, margin: 0 }}>Add Phase</h3>
+              <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400 }}>{I.x}</button>
+            </div>
+            <div style={{ padding: "20px 24px 24px" }}>
+              <div style={{ display: "grid", gap: 14 }}>
+                <div><label style={ls}>Phase Name</label><input style={fs} placeholder="e.g. Parapet Coping" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div><label style={ls}>Start Date</label><input style={fs} type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} /></div>
+                  <div><label style={ls}>End Date</label><input style={fs} type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></div>
+                </div>
+                <div><label style={ls}>Color</label>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {phaseColors.map(c => <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))} style={{ width: 28, height: 28, borderRadius: 6, background: c, border: form.color === c ? `3px solid ${C.navy}` : `2px solid transparent`, cursor: "pointer", transition: "all 0.15s" }} />)}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 24, justifyContent: "flex-end" }}>
+                <button onClick={onClose} style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                <button onClick={() => { if (form.name) onAdd({ ...form, id: generateId(), progress: 0 }); }} disabled={!form.name}
+                  style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: form.name ? C.red : C.gray300, color: form.name ? C.white : C.gray400, fontSize: 13, fontWeight: 600, cursor: form.name ? "pointer" : "default" }}>Add Phase</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Schedule Tab
+    function ScheduleTab({ project, onUpdateProject }) {
+      const [phases, setPhases] = useState(project.schedule || []);
+      const [editPhase, setEditPhase] = useState(null);
+      const [showAddPhase, setShowAddPhase] = useState(false);
+      const [generating, setGenerating] = useState(false);
+      const [genError, setGenError] = useState(null);
+      const hasSchedule = phases.length > 0;
+
+      const projectStart = hasSchedule ? phases.reduce((min, p) => p.startDate < min ? p.startDate : min, phases[0].startDate) : project.startDate || new Date().toISOString().split("T")[0];
+      const projectEnd = hasSchedule ? phases.reduce((max, p) => p.endDate > max ? p.endDate : max, phases[0].endDate) : project.estCompletion || addDays(projectStart, 30);
+
+      const handleGenerateAI = async () => {
+        setGenerating(true); setGenError(null);
+        try {
+          const prompt = `You are a scheduling assistant for Colony Roofers, a GAF President's Club roofing contractor. Generate a construction schedule for this roofing project:
+
+Project: ${project.name}
+Roof Type: ${project.roofType}
+Square Footage: ${project.sqft || "Unknown"}
+Buildings: ${project.buildings || 1}
+Start Date: ${project.startDate || new Date().toISOString().split("T")[0]}
+Estimated Completion: ${project.estCompletion || "Unknown"}
+
+Return ONLY valid JSON (no markdown, no preamble) as an array of phases:
+[{"name":"Phase Name","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","color":"#hex"}]
+
+Use realistic durations based on the roof type and size. Include phases like: Mobilization/Setup, Tear-Off, Dry-In, Installation, Detail Work/Flashing, Cleanup & Final Inspection. Add more specific phases if the roof type warrants it (e.g., Insulation for TPO, Substrate Prep for membrane). Keep phases sequential with minimal overlap. Use these colors in order: #6366F1, #EF4444, #F59E0B, #10B981, #3B82F6, #8B5CF6, #EC4899, #14B8A6.`;
+
+          const response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
+          });
+          const result = await response.json();
+          const text = result.content?.find(c => c.type === "text")?.text || "";
+          const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+          const withIds = parsed.map(p => ({ ...p, id: generateId(), progress: 0 }));
+          setPhases(withIds);
+          onUpdateProject({ schedule: withIds, startDate: withIds[0]?.startDate, estCompletion: withIds[withIds.length - 1]?.endDate });
+        } catch (err) {
+          console.error("Schedule generation error:", err);
+          setGenError("Failed to generate schedule. Using default phases.");
+          // Fallback to default phases
+          const start = project.startDate || new Date().toISOString().split("T")[0];
+          const fallback = DEFAULT_PHASES.map(p => ({ ...p, id: generateId(), startDate: addDays(start, p.daysOffset), endDate: addDays(start, p.daysOffset + p.durationDays), progress: 0 }));
+          setPhases(fallback);
+          onUpdateProject({ schedule: fallback });
+        } finally { setGenerating(false); }
+      };
+
+      const handleSavePhase = (updated) => {
+        const newPhases = phases.map(p => p.id === updated.id ? updated : p);
+        setPhases(newPhases);
+        onUpdateProject({ schedule: newPhases });
+        setEditPhase(null);
+      };
+
+      const handleDeletePhase = (id) => {
+        const newPhases = phases.filter(p => p.id !== id);
+        setPhases(newPhases);
+        onUpdateProject({ schedule: newPhases });
+        setEditPhase(null);
+      };
+
+      const handleAddPhase = (phase) => {
+        const newPhases = [...phases, phase].sort((a, b) => a.startDate.localeCompare(b.startDate));
+        setPhases(newPhases);
+        onUpdateProject({ schedule: newPhases });
+        setShowAddPhase(false);
+      };
+
+      const overallProgress = hasSchedule ? Math.round(phases.reduce((s, p) => s + (p.progress || 0), 0) / phases.length) : 0;
+      const delayedPhases = phases.filter(p => p.delay);
+
+      return (
+        <div>
+          {/* Summary bar */}
+          {hasSchedule && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <div style={{ padding: "14px 16px", borderRadius: 10, background: C.white, border: `1px solid ${C.gray200}` }}>
+                <p style={{ fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Overall Progress</p>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: C.navy }}>{overallProgress}%</span>
+                  <div style={{ flex: 1 }}><ProgressBar value={overallProgress} /></div>
+                </div>
+              </div>
+              <div style={{ padding: "14px 16px", borderRadius: 10, background: C.white, border: `1px solid ${C.gray200}` }}>
+                <p style={{ fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Phases</p>
+                <span style={{ fontSize: 20, fontWeight: 800, color: C.navy }}>{phases.length}</span>
+              </div>
+              <div style={{ padding: "14px 16px", borderRadius: 10, background: C.white, border: `1px solid ${delayedPhases.length > 0 ? C.yellow + "60" : C.gray200}` }}>
+                <p style={{ fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Delays</p>
+                <span style={{ fontSize: 20, fontWeight: 800, color: delayedPhases.length > 0 ? C.yellow : C.green }}>{delayedPhases.length}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Gantt chart or empty state */}
+          {hasSchedule ? (
+            <>
+              <GanttChart phases={phases} projectStart={projectStart} projectEnd={projectEnd} onPhaseClick={setEditPhase} />
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                <button onClick={() => setShowAddPhase(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{I.plus} Add Phase</button>
+                <button onClick={handleGenerateAI} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, border: `1px solid ${C.navy}30`, background: C.navy + "08", color: C.navy, fontSize: 12, fontWeight: 600, cursor: generating ? "default" : "pointer" }}>
+                  {generating ? <Spinner size={12} color={C.navy} /> : I.zap} Regenerate
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: C.gray400, marginTop: 8 }}>Click any phase to edit dates, progress, or report delays.</p>
+
+              {/* Delay log */}
+              {delayedPhases.length > 0 && (
+                <div style={{ marginTop: 20 }}>
+                  <h4 style={{ fontSize: 11, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px" }}>Active Delays</h4>
+                  {delayedPhases.map(p => (
+                    <div key={p.id} style={{ padding: "10px 14px", borderRadius: 8, background: C.yellowBg + "60", border: `1px solid ${C.yellow}30`, marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 10 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: p.color, marginTop: 4, flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: C.yellow, fontWeight: 600 }}>{p.delay.reason}</div>
+                        {p.delay.notes && <div style={{ fontSize: 11, color: C.gray500, marginTop: 2 }}>{p.delay.notes}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ padding: "40px 20px", textAlign: "center", background: C.white, borderRadius: 12, border: `2px dashed ${C.gray300}` }}>
+              <div style={{ color: C.gray300, marginBottom: 12 }}>{I.calendar}</div>
+              <p style={{ fontSize: 15, fontWeight: 600, color: C.gray500, margin: "0 0 6px" }}>No schedule yet</p>
+              <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 20px" }}>Generate a schedule with AI based on the project details, or add phases manually.</p>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                <button onClick={handleGenerateAI} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, color: C.white, fontSize: 14, fontWeight: 600, cursor: generating ? "default" : "pointer", boxShadow: `0 4px 12px ${C.navy}30` }}>
+                  {generating ? <Spinner size={16} /> : I.zap} Generate with AI
+                </button>
+                <button onClick={() => setShowAddPhase(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 20px", borderRadius: 10, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{I.plus} Add Manually</button>
+              </div>
+            </div>
+          )}
+
+          {genError && <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, background: C.yellowBg, display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: C.yellow }}>{I.alert}</span><span style={{ fontSize: 12, color: C.yellow, fontWeight: 500 }}>{genError}</span></div>}
+
+          {editPhase && <PhaseEditModal phase={editPhase} onSave={handleSavePhase} onDelete={handleDeletePhase} onClose={() => setEditPhase(null)} />}
+          {showAddPhase && <AddPhaseModal existingPhases={phases} onAdd={handleAddPhase} onClose={() => setShowAddPhase(false)} />}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // MATERIAL & LABOR ORDERS (Phase 4)
+    // ============================================================
+
+    // Material Order Line Item Row
+    function MaterialLineItem({ item, idx, onUpdate, onRemove }) {
+      const fs = { padding: "6px 8px", border: `1px solid ${C.gray200}`, borderRadius: 6, fontSize: 12, color: C.navy, outline: "none", boxSizing: "border-box", width: "100%", background: C.white };
+      const STATUSES_MAT = ["Pending", "Ordered", "Partial", "Received", "Backordered"];
+      const statusColors = { Pending: C.gray400, Ordered: C.blue, Partial: C.yellow, Received: C.green, Backordered: C.red };
+
+      return (
+        <tr style={{ borderBottom: `1px solid ${C.gray100}` }}>
+          <td style={{ padding: "8px 6px" }}><input style={fs} value={item.material} onChange={e => onUpdate(idx, "material", e.target.value)} /></td>
+          <td style={{ padding: "8px 6px" }}><input style={fs} value={item.spec} onChange={e => onUpdate(idx, "spec", e.target.value)} /></td>
+          <td style={{ padding: "8px 4px", width: 70 }}><input style={{ ...fs, textAlign: "right" }} type="number" value={item.qty} onChange={e => onUpdate(idx, "qty", Number(e.target.value))} /></td>
+          <td style={{ padding: "8px 4px", width: 60 }}><input style={fs} value={item.unit} onChange={e => onUpdate(idx, "unit", e.target.value)} /></td>
+          <td style={{ padding: "8px 4px", width: 85 }}><input style={{ ...fs, textAlign: "right" }} type="number" value={item.unitCost} onChange={e => onUpdate(idx, "unitCost", Number(e.target.value))} /></td>
+          <td style={{ padding: "8px 4px", width: 80, textAlign: "right", fontSize: 12, fontWeight: 600, color: C.navy }}>{formatCurrency((item.qty || 0) * (item.unitCost || 0))}</td>
+          <td style={{ padding: "8px 4px", width: 95 }}>
+            <select style={{ ...fs, color: statusColors[item.status] || C.gray400, fontWeight: 600, fontSize: 11 }} value={item.status || "Pending"} onChange={e => onUpdate(idx, "status", e.target.value)}>
+              {STATUSES_MAT.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </td>
+          <td style={{ padding: "8px 2px", width: 32 }}><button onClick={() => onRemove(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray300, padding: 2 }}>{I.trash}</button></td>
+        </tr>
+      );
+    }
+
+    // Material Order Component
+    function MaterialOrder({ project, materials, setMaterials, onUpdateProject }) {
+      const [generating, setGenerating] = useState(false);
+      const hasMaterials = materials.length > 0;
+
+      const handleUpdate = (idx, field, value) => {
+        const updated = [...materials];
+        updated[idx] = { ...updated[idx], [field]: value };
+        setMaterials(updated);
+      };
+      const handleRemove = (idx) => { setMaterials(materials.filter((_, i) => i !== idx)); };
+      const handleAdd = () => { setMaterials([...materials, { material: "", spec: "", qty: 0, unit: "sq ft", unitCost: 0, status: "Pending", notes: "" }]); };
+      const totalCost = materials.reduce((s, m) => s + (m.qty || 0) * (m.unitCost || 0), 0);
+
+      const handleSave = () => {
+        onUpdateProject({ materialOrder: materials });
+      };
+
+      const handleGenerate = async () => {
+        setGenerating(true);
+        try {
+          const prompt = `You are a material estimator for Colony Roofers, a GAF President's Club roofing contractor. Generate a detailed material order for this project:
+
+Project: ${project.name}
+Roof Type: ${project.roofType}
+Square Footage: ${project.sqft || "Unknown"}
+Buildings: ${project.buildings || 1}
+Contract Value: ${project.contractValue ? formatCurrency(project.contractValue) : "Unknown"}
+Estimated Cost: ${project.estimatedCost ? formatCurrency(project.estimatedCost) : "Unknown"}
+
+Return ONLY valid JSON (no markdown, no preamble) as an array:
+[{"material":"Item Name","spec":"Brand/Specification","qty":<number>,"unit":"unit","unitCost":<number>,"status":"Pending","notes":""}]
+
+Include all materials needed: primary roofing material, underlayment, insulation (if applicable), fasteners, adhesives, flashing, edge metal, caulk/sealant, pipe boots, drains, and any accessories. Use realistic quantities based on the sq ft and roof type. Use realistic contractor pricing. Units can be: sq ft, rolls, sheets, bundles, boxes, gallons, tubes, each, linear ft.`;
+
+          const response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
+          });
+          const result = await response.json();
+          const text = result.content?.find(c => c.type === "text")?.text || "";
+          const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+          setMaterials(parsed);
+        } catch (err) {
+          console.error("Material generation error:", err);
+        } finally { setGenerating(false); }
+      };
+
+      // Export to printable format
+      const handleExport = () => {
+        const rows = materials.map(m => `${m.material}\t${m.spec}\t${m.qty}\t${m.unit}\t$${m.unitCost}\t$${(m.qty * m.unitCost).toFixed(0)}`);
+        const header = `MATERIAL ORDER — ${project.name}\nDate: ${new Date().toLocaleDateString()}\nRoof Type: ${project.roofType} | Sq Ft: ${project.sqft?.toLocaleString() || "N/A"}\n${"—".repeat(80)}\nMaterial\tSpec\tQty\tUnit\tUnit Cost\tTotal`;
+        const footer = `${"—".repeat(80)}\nTOTAL: ${formatCurrency(totalCost)}`;
+        const content = [header, ...rows, footer].join("\n");
+        const blob = new Blob([content], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = `Material_Order_${project.name.replace(/[^a-zA-Z0-9]/g, "_")}.txt`; a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      return (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 700, color: C.navy, margin: 0 }}>Material Order</h4>
+            <div style={{ display: "flex", gap: 6 }}>
+              {hasMaterials && <button onClick={handleExport} style={{ padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Export</button>}
+              <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.navy}30`, background: C.navy + "08", color: C.navy, fontSize: 11, fontWeight: 600, cursor: generating ? "default" : "pointer" }}>
+                {generating ? <Spinner size={10} color={C.navy} /> : I.zap} {hasMaterials ? "Regenerate" : "Generate"} with AI
+              </button>
+            </div>
+          </div>
+
+          {hasMaterials ? (
+            <>
+              <div style={{ overflowX: "auto", borderRadius: 10, border: `1px solid ${C.gray200}`, background: C.white }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: C.gray50 }}>
+                      <th style={{ padding: "10px 6px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.05em" }}>Material</th>
+                      <th style={{ padding: "10px 6px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Spec</th>
+                      <th style={{ padding: "10px 4px", textAlign: "right", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 70 }}>Qty</th>
+                      <th style={{ padding: "10px 4px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 60 }}>Unit</th>
+                      <th style={{ padding: "10px 4px", textAlign: "right", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 85 }}>Unit $</th>
+                      <th style={{ padding: "10px 4px", textAlign: "right", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 80 }}>Total</th>
+                      <th style={{ padding: "10px 4px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 95 }}>Status</th>
+                      <th style={{ width: 32 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materials.map((m, i) => <MaterialLineItem key={i} item={m} idx={i} onUpdate={handleUpdate} onRemove={handleRemove} />)}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: C.gray50 }}>
+                      <td colSpan="5" style={{ padding: "10px 6px", textAlign: "right", fontSize: 12, fontWeight: 700, color: C.gray500 }}>Total Material Cost:</td>
+                      <td style={{ padding: "10px 4px", textAlign: "right", fontSize: 14, fontWeight: 800, color: C.navy }}>{formatCurrency(totalCost)}</td>
+                      <td colSpan="2"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button onClick={handleAdd} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{I.plus} Add Line</button>
+                <button onClick={handleSave} style={{ padding: "6px 16px", borderRadius: 6, border: "none", background: C.green, color: C.white, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save Order</button>
+              </div>
+            </>
+          ) : (
+            <div style={{ padding: "32px 16px", textAlign: "center", background: C.white, borderRadius: 10, border: `2px dashed ${C.gray300}` }}>
+              <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 12px" }}>No material order yet. Generate one from project specs or add items manually.</p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  {generating ? <Spinner size={12} /> : I.zap} Generate with AI
+                </button>
+                <button onClick={handleAdd} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 16px", borderRadius: 8, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{I.plus} Add Manually</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Labor Order Component
+    function LaborOrder({ project, laborOrders, setLaborOrders, onUpdateProject, supers }) {
+      const [generating, setGenerating] = useState(false);
+      const [editIdx, setEditIdx] = useState(null);
+      const hasOrders = laborOrders.length > 0;
+
+      const handleGenerate = async () => {
+        setGenerating(true);
+        try {
+          const prompt = `You are a production coordinator for Colony Roofers, a GAF President's Club roofing contractor. Generate labor orders for this project:
+
+Project: ${project.name}
+Roof Type: ${project.roofType}
+Square Footage: ${project.sqft || "Unknown"}
+Buildings: ${project.buildings || 1}
+Contract Value: ${project.contractValue ? formatCurrency(project.contractValue) : "Unknown"}
+
+Return ONLY valid JSON (no markdown) as an array of labor orders:
+[{"title":"Order Title","scope":"Detailed scope of work description","sqft":${project.sqft || 0},"minPay":<number>,"subcontractor":"TBD — From Approved List","startDate":"${project.startDate || "TBD"}","endDate":"TBD","notes":""}]
+
+Generate separate labor orders for each major work phase (e.g., Tear-Off, Installation, Detail Work). Each order should have a clear scope of work describing exactly what labor is expected. Use realistic minimum pay rates based on the roof type and square footage. The scope should be very detailed — include specific tasks, quality expectations, and cleanup requirements.`;
+
+          const response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
+          });
+          const result = await response.json();
+          const text = result.content?.find(c => c.type === "text")?.text || "";
+          const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+          const withIds = parsed.map(o => ({ ...o, id: generateId() }));
+          setLaborOrders(withIds);
+        } catch (err) {
+          console.error("Labor order generation error:", err);
+        } finally { setGenerating(false); }
+      };
+
+      const handleSave = () => { onUpdateProject({ laborOrders }); };
+
+      const handleAddOrder = () => {
+        const newOrder = { id: generateId(), title: "New Labor Order", scope: "", sqft: project.sqft || 0, minPay: 0, subcontractor: "TBD — From Approved List", startDate: project.startDate || "", endDate: "", notes: "" };
+        setLaborOrders([...laborOrders, newOrder]);
+        setEditIdx(laborOrders.length);
+      };
+
+      const handleUpdateOrder = (idx, field, value) => {
+        const updated = [...laborOrders];
+        updated[idx] = { ...updated[idx], [field]: value };
+        setLaborOrders(updated);
+      };
+
+      const handleDeleteOrder = (idx) => {
+        setLaborOrders(laborOrders.filter((_, i) => i !== idx));
+        setEditIdx(null);
+      };
+
+      const handleExport = (order) => {
+        const content = `LABOR ORDER — ${project.name}
+${"═".repeat(60)}
+Order: ${order.title}
+Date: ${new Date().toLocaleDateString()}
+${"─".repeat(60)}
+
+PROJECT INFORMATION
+  Project:       ${project.name}
+  Address:       ${project.address || "TBD"}
+  Roof Type:     ${project.roofType}
+  Market:        ${MARKET_LABELS[project.market] || project.market}
+
+ORDER DETAILS
+  Square Footage:  ${(order.sqft || 0).toLocaleString()} sq ft
+  Minimum Pay:     ${formatCurrency(order.minPay || 0)}
+  Subcontractor:   ${order.subcontractor}
+  Start Date:      ${order.startDate || "TBD"}
+  End Date:        ${order.endDate || "TBD"}
+
+SCOPE OF WORK
+${"─".repeat(60)}
+${order.scope || "No scope defined."}
+
+${order.notes ? `NOTES\n${"─".repeat(60)}\n${order.notes}` : ""}
+${"═".repeat(60)}
+Colony Roofers LLC — GAF President's Club Contractor
+`;
+        const blob = new Blob([content], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = `Labor_Order_${order.title.replace(/[^a-zA-Z0-9]/g, "_")}.txt`; a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const fs = { width: "100%", padding: "10px 12px", border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, color: C.navy, outline: "none", boxSizing: "border-box" };
+      const ls = { fontSize: 12, fontWeight: 600, color: C.gray600, marginBottom: 4, display: "block" };
+
+      return (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 700, color: C.navy, margin: 0 }}>Labor Orders</h4>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.navy}30`, background: C.navy + "08", color: C.navy, fontSize: 11, fontWeight: 600, cursor: generating ? "default" : "pointer" }}>
+                {generating ? <Spinner size={10} color={C.navy} /> : I.zap} {hasOrders ? "Regenerate" : "Generate"} with AI
+              </button>
+            </div>
+          </div>
+
+          {hasOrders ? (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {laborOrders.map((order, idx) => (
+                  <div key={order.id} style={{ borderRadius: 10, border: `1px solid ${editIdx === idx ? C.red + "60" : C.gray200}`, background: C.white, overflow: "hidden" }}>
+                    {/* Order header - always visible */}
+                    <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", background: editIdx === idx ? C.redBg + "30" : "transparent" }}
+                      onClick={() => setEditIdx(editIdx === idx ? null : idx)}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>{order.title}</div>
+                        <div style={{ fontSize: 11, color: C.gray500, marginTop: 2 }}>
+                          {order.sqft?.toLocaleString()} sq ft · {formatCurrency(order.minPay || 0)} min pay · {order.subcontractor}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <button onClick={(e) => { e.stopPropagation(); handleExport(order); }} style={{ padding: "4px 10px", borderRadius: 5, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray500, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Export</button>
+                        <span style={{ color: C.gray400, transform: editIdx === idx ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s", fontSize: 10 }}>▼</span>
+                      </div>
+                    </div>
+
+                    {/* Expanded edit form */}
+                    {editIdx === idx && (
+                      <div style={{ padding: "16px", borderTop: `1px solid ${C.gray200}` }}>
+                        <div style={{ display: "grid", gap: 12 }}>
+                          <div><label style={ls}>Order Title</label><input style={fs} value={order.title} onChange={e => handleUpdateOrder(idx, "title", e.target.value)} /></div>
+                          <div><label style={ls}>Scope of Work</label><textarea style={{ ...fs, minHeight: 100, resize: "vertical" }} value={order.scope} onChange={e => handleUpdateOrder(idx, "scope", e.target.value)} placeholder="Detailed description of labor tasks, quality expectations, and cleanup requirements..." /></div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            <div><label style={ls}>Square Footage</label><input style={fs} type="number" value={order.sqft || 0} onChange={e => handleUpdateOrder(idx, "sqft", Number(e.target.value))} /></div>
+                            <div><label style={ls}>Minimum Pay</label><input style={fs} type="number" value={order.minPay || 0} onChange={e => handleUpdateOrder(idx, "minPay", Number(e.target.value))} /></div>
+                          </div>
+                          <div><label style={ls}>Subcontractor</label><input style={fs} value={order.subcontractor} onChange={e => handleUpdateOrder(idx, "subcontractor", e.target.value)} /></div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            <div><label style={ls}>Start Date</label><input style={fs} type="date" value={order.startDate || ""} onChange={e => handleUpdateOrder(idx, "startDate", e.target.value)} /></div>
+                            <div><label style={ls}>End Date</label><input style={fs} type="date" value={order.endDate || ""} onChange={e => handleUpdateOrder(idx, "endDate", e.target.value)} /></div>
+                          </div>
+                          <div><label style={ls}>Notes</label><textarea style={{ ...fs, minHeight: 50, resize: "vertical" }} value={order.notes || ""} onChange={e => handleUpdateOrder(idx, "notes", e.target.value)} placeholder="Additional notes..." /></div>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+                          <button onClick={() => handleDeleteOrder(idx)} style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${C.red}40`, background: C.redBg, color: C.red, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Delete Order</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button onClick={handleAddOrder} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{I.plus} Add Order</button>
+                <button onClick={handleSave} style={{ padding: "6px 16px", borderRadius: 6, border: "none", background: C.green, color: C.white, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save All Orders</button>
+              </div>
+            </>
+          ) : (
+            <div style={{ padding: "32px 16px", textAlign: "center", background: C.white, borderRadius: 10, border: `2px dashed ${C.gray300}` }}>
+              <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 12px" }}>No labor orders yet. Generate them from project specs or create manually.</p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  {generating ? <Spinner size={12} /> : I.zap} Generate with AI
+                </button>
+                <button onClick={handleAddOrder} style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 16px", borderRadius: 8, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{I.plus} Add Manually</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Orders Tab (combines Material + Labor)
+    function OrdersTab({ project, onUpdateProject, supers }) {
+      const [activeSection, setActiveSection] = useState("materials");
+      const [materials, setMaterials] = useState(project.materialOrder || []);
+      const [laborOrders, setLaborOrders] = useState(project.laborOrders || []);
+
+      const handleProjectUpdate = (updates) => { onUpdateProject(updates); };
+
+      const matTotal = materials.reduce((s, m) => s + (m.qty || 0) * (m.unitCost || 0), 0);
+      const laborTotal = laborOrders.reduce((s, o) => s + (o.minPay || 0), 0);
+
+      return (
+        <div>
+          {/* Summary cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div style={{ padding: "14px 16px", borderRadius: 10, background: C.white, border: `1px solid ${C.gray200}`, cursor: "pointer", transition: "all 0.15s", borderLeftWidth: 3, borderLeftColor: activeSection === "materials" ? C.blue : C.gray200 }}
+              onClick={() => setActiveSection("materials")}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Material Order</p>
+              <span style={{ fontSize: 18, fontWeight: 800, color: C.navy }}>{materials.length > 0 ? formatCurrency(matTotal) : "—"}</span>
+              <p style={{ fontSize: 11, color: C.gray400, margin: "2px 0 0" }}>{materials.length} line items</p>
+            </div>
+            <div style={{ padding: "14px 16px", borderRadius: 10, background: C.white, border: `1px solid ${C.gray200}`, cursor: "pointer", transition: "all 0.15s", borderLeftWidth: 3, borderLeftColor: activeSection === "labor" ? C.green : C.gray200 }}
+              onClick={() => setActiveSection("labor")}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Labor Orders</p>
+              <span style={{ fontSize: 18, fontWeight: 800, color: C.navy }}>{laborOrders.length > 0 ? formatCurrency(laborTotal) : "—"}</span>
+              <p style={{ fontSize: 11, color: C.gray400, margin: "2px 0 0" }}>{laborOrders.length} orders</p>
+            </div>
+          </div>
+
+          {/* Section toggle */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 16, background: C.white, border: `1px solid ${C.gray200}`, borderRadius: 8, padding: 3 }}>
+            <button onClick={() => setActiveSection("materials")} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, background: activeSection === "materials" ? C.navy : "transparent", color: activeSection === "materials" ? C.white : C.gray500, cursor: "pointer", transition: "all 0.2s" }}>Materials</button>
+            <button onClick={() => setActiveSection("labor")} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, background: activeSection === "labor" ? C.navy : "transparent", color: activeSection === "labor" ? C.white : C.gray500, cursor: "pointer", transition: "all 0.2s" }}>Labor</button>
+          </div>
+
+          {activeSection === "materials" && <MaterialOrder project={project} materials={materials} setMaterials={setMaterials} onUpdateProject={handleProjectUpdate} />}
+          {activeSection === "labor" && <LaborOrder project={project} laborOrders={laborOrders} setLaborOrders={setLaborOrders} onUpdateProject={handleProjectUpdate} supers={supers} />}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // PROJECT DETAIL PANEL (Tabbed)
+    // ============================================================
+    function ProjectDetail({ project, onClose, supers, onUpdateProject }) {
+      const superName = supers.find(s => s.id === project.assignedSuper)?.name || "Unassigned";
+      const marginHealth = getMarginHealth(project.estimatedMargin, project.currentMargin);
+      const [activeTab, setActiveTab] = useState("overview");
+      const tabs = [
+        { id: "overview", label: "Overview" }, { id: "documents", label: "Documents" },
+        { id: "schedule", label: "Schedule" }, { id: "orders", label: "Orders" },
+        { id: "logs", label: "Daily Logs", disabled: true }, { id: "budget", label: "Budget", disabled: true },
+      ];
+      const Sec = ({ title, children }) => <div style={{ marginBottom: 24 }}><h4 style={{ fontSize: 11, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px" }}>{title}</h4>{children}</div>;
+      const Row = ({ label, value, accent }) => <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${C.gray100}` }}><span style={{ fontSize: 13, color: C.gray500 }}>{label}</span><span style={{ fontSize: 13, fontWeight: 600, color: accent || C.navy }}>{value}</span></div>;
+      const handleProjectUpdate = (updates) => { onUpdateProject(project.id, updates); };
+
+      return (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", justifyContent: "flex-end", background: "rgba(17,29,53,0.4)", backdropFilter: "blur(2px)" }} onClick={onClose}>
+          <div style={{ width: 640, height: "100%", background: C.gray50, overflowY: "auto", boxShadow: "-8px 0 30px rgba(0,0,0,0.15)", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${C.gray200}`, background: `linear-gradient(135deg, ${C.navyDark}, ${C.navy})`, color: C.white, flexShrink: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                <div style={{ display: "flex", gap: 8 }}><MarketTag market={project.market} /><StatusBadge status={project.status} /></div>
+                <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.6)" }}>{I.x}</button>
+              </div>
+              <h2 style={{ fontSize: 17, fontWeight: 700, margin: "0 0 3px", lineHeight: 1.3 }}>{project.name}</h2>
+              <p style={{ fontSize: 12, opacity: 0.7, margin: 0 }}>{project.client}</p>
+            </div>
+            {/* Tab Bar */}
+            <div style={{ display: "flex", gap: 0, padding: "0 24px", background: C.white, borderBottom: `1px solid ${C.gray200}`, flexShrink: 0, overflowX: "auto" }}>
+              {tabs.map(tab => (
+                <button key={tab.id} onClick={() => !tab.disabled && setActiveTab(tab.id)} style={{ padding: "10px 14px", border: "none", background: "none", cursor: tab.disabled ? "default" : "pointer", fontSize: 12, fontWeight: 600, color: tab.disabled ? C.gray300 : activeTab === tab.id ? C.red : C.gray500, borderBottom: `2px solid ${activeTab === tab.id ? C.red : "transparent"}`, transition: "all 0.2s", whiteSpace: "nowrap", opacity: tab.disabled ? 0.5 : 1 }}>
+                  {tab.label}{tab.disabled && <span style={{ fontSize: 9, background: C.gray200, color: C.gray400, padding: "1px 5px", borderRadius: 3, marginLeft: 4 }}>Soon</span>}
+                </button>
+              ))}
+            </div>
+            {/* Tab Content */}
+            <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+              {activeTab === "overview" && (<>
+                <Sec title="Progress">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: C.navy }}>{project.progress}%</span>
+                    <MarginBadge estimated={project.estimatedMargin} current={project.currentMargin} />
+                  </div>
+                  <ProgressBar value={project.progress} color={project.status === "Delayed" ? C.yellow : C.green} />
+                </Sec>
+                <Sec title="Financial Summary">
+                  <Row label="Contract Value" value={formatCurrency(project.contractValue)} />
+                  <Row label="Estimated Cost" value={formatCurrency(project.estimatedCost)} />
+                  <Row label="Cost to Date" value={formatCurrency(project.currentCost)} />
+                  <Row label="Remaining Budget" value={formatCurrency(project.estimatedCost - project.currentCost)} accent={project.currentCost > project.estimatedCost ? C.red : C.green} />
+                  <Row label="Est. Margin" value={`${project.estimatedMargin}%`} />
+                  <Row label="Current Margin" value={`${Math.round(((project.contractValue - project.currentCost) / project.contractValue) * 100)}%`} accent={marginHealth === "critical" ? C.red : marginHealth === "warning" ? C.yellow : C.green} />
+                </Sec>
+                <Sec title="Project Details">
+                  <Row label="Address" value={project.address || "—"} />
+                  <Row label="Roof Type" value={project.roofType} />
+                  <Row label="Square Footage" value={project.sqft?.toLocaleString() || "—"} />
+                  <Row label="Buildings" value={project.buildings} />
+                  <Row label="Superintendent" value={superName} />
+                </Sec>
+                <Sec title="Timeline">
+                  <Row label="Start Date" value={project.startDate ? formatDate(project.startDate) : "—"} />
+                  <Row label="Est. Completion" value={project.estCompletion ? formatDate(project.estCompletion) : "—"} />
+                </Sec>
+              </>)}
+              {activeTab === "documents" && <DocumentsTab project={project} onUpdateProject={handleProjectUpdate} />}
+              {activeTab === "schedule" && <ScheduleTab project={project} onUpdateProject={handleProjectUpdate} />}
+              {activeTab === "orders" && <OrdersTab project={project} onUpdateProject={handleProjectUpdate} supers={supers} />}
+              {activeTab !== "overview" && activeTab !== "documents" && activeTab !== "schedule" && activeTab !== "orders" && (
+                <div style={{ padding: "48px 0", textAlign: "center" }}>
+                  <div style={{ color: C.gray300, marginBottom: 12 }}>{I.clock}</div>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: C.gray400, margin: "0 0 4px" }}>Coming Soon</p>
+                  <p style={{ fontSize: 12, color: C.gray400, margin: 0 }}>This module is in the build queue.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // PROJECT CARD
+    // ============================================================
+    function ProjectCard({ project, onClick, supers }) {
+      const superName = supers.find(s => s.id === project.assignedSuper)?.name || "Unassigned";
+      const marginHealth = getMarginHealth(project.estimatedMargin, project.currentMargin);
+      const marginColor = marginHealth === "critical" ? C.red : marginHealth === "warning" ? C.yellow : C.green;
+      return (
+        <div onClick={onClick} style={{ background: C.white, borderRadius: 12, border: `1px solid ${C.gray200}`, padding: "20px 22px", cursor: "pointer", transition: "all 0.2s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.red + "60"; e.currentTarget.style.boxShadow = `0 4px 20px ${C.navy}10`; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = C.gray200; e.currentTarget.style.boxShadow = "none"; }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}><MarketTag market={project.market} /><StatusBadge status={project.status} /></div>
+            <MarginBadge estimated={project.estimatedMargin} current={project.currentMargin} />
+          </div>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.navy, margin: "0 0 3px", lineHeight: 1.3 }}>{project.name}</h3>
+          <p style={{ fontSize: 13, color: C.gray500, margin: "0 0 16px" }}>{project.client}</p>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: C.gray500 }}>Progress</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.navy }}>{project.progress}%</span>
+            </div>
+            <ProgressBar value={project.progress} color={project.status === "Delayed" ? C.yellow : C.green} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, paddingTop: 14, borderTop: `1px solid ${C.gray100}` }}>
+            <div><p style={{ fontSize: 10, color: C.gray400, margin: 0, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Contract</p><p style={{ fontSize: 14, fontWeight: 700, color: C.navy, margin: "2px 0 0" }}>{formatCurrency(project.contractValue)}</p></div>
+            <div><p style={{ fontSize: 10, color: C.gray400, margin: 0, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Margin</p><p style={{ fontSize: 14, fontWeight: 700, margin: "2px 0 0", color: marginColor }}>{Math.round(((project.contractValue - project.currentCost) / project.contractValue) * 100)}%</p></div>
+            <div><p style={{ fontSize: 10, color: C.gray400, margin: 0, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Super</p><p style={{ fontSize: 12, fontWeight: 600, color: C.navy, margin: "3px 0 0" }}>{superName.split(" ")[0]}</p></div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // MAIN DASHBOARD
+    // ============================================================
+    function Dashboard({ user, onLogout }) {
+      const [projects, setProjects] = useState(INITIAL_PROJECTS);
+      const [marketFilter, setMarketFilter] = useState("All");
+      const [statusFilter, setStatusFilter] = useState("All");
+      const [search, setSearch] = useState("");
+      const [showCreate, setShowCreate] = useState(false);
+      const [selectedProjectId, setSelectedProjectId] = useState(null);
+      const supers = USERS.filter(u => u.role === "superintendent");
+      const selectedProject = selectedProjectId ? projects.find(p => p.id === selectedProjectId) : null;
+      const roleFiltered = user.role === "superintendent" ? projects.filter(p => p.assignedSuper === user.id) : projects;
+      const filtered = roleFiltered.filter(p => {
+        if (marketFilter !== "All" && p.market !== marketFilter) return false;
+        if (statusFilter !== "All" && p.status !== statusFilter) return false;
+        if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.client.toLowerCase().includes(search.toLowerCase())) return false;
+        return true;
+      });
+      const activeProjects = roleFiltered.filter(p => p.status !== "Complete");
+      const totalContractValue = roleFiltered.reduce((s, p) => s + p.contractValue, 0);
+      const delayedCount = roleFiltered.filter(p => p.status === "Delayed").length;
+      const atRisk = roleFiltered.filter(p => getMarginHealth(p.estimatedMargin, p.currentMargin) !== "healthy").length;
+      const handleCreate = (np) => { setProjects(prev => [np, ...prev]); setShowCreate(false); };
+      const handleUpdateProject = (pid, updates) => { setProjects(prev => prev.map(p => p.id === pid ? { ...p, ...updates } : p)); };
+
+      return (
+        <div style={{ minHeight: "100vh", background: C.gray50 }}>
+          {/* Nav */}
+          <nav style={{ background: C.navy, padding: "0 32px", height: 60, display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: `0 2px 12px ${C.navyDark}40` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.red}, ${C.redDark})` }}><span style={{ color: C.white, fontSize: 14, fontWeight: 800 }}>CR</span></div>
+              <div><span style={{ color: C.white, fontSize: 15, fontWeight: 700 }}>Colony Roofers</span><span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginLeft: 10, fontWeight: 500 }}>Large Projects</span></div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "rgba(255,255,255,0.08)", borderRadius: 8 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${C.red}, ${C.redDark})`, display: "flex", alignItems: "center", justifyContent: "center", color: C.white, fontSize: 11, fontWeight: 700 }}>{user.initials}</div>
+                <div><div style={{ fontSize: 12, fontWeight: 600, color: C.white }}>{user.name}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textTransform: "capitalize" }}>{user.role}</div></div>
+              </div>
+              <button onClick={onLogout} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)", padding: 4, borderRadius: 4 }} title="Sign Out">{I.logout}</button>
+            </div>
+          </nav>
+
+          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 32px" }}>
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+              <div>
+                <h1 style={{ fontSize: 24, fontWeight: 800, color: C.navy, margin: 0, letterSpacing: "-0.02em" }}>Production Dashboard</h1>
+                <p style={{ fontSize: 14, color: C.gray500, margin: "4px 0 0" }}>{user.role === "superintendent" ? "Your assigned projects" : "All large projects across Atlanta, Tampa & Dallas"}</p>
+              </div>
+              {user.role !== "superintendent" && (
+                <button onClick={() => setShowCreate(true)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", background: `linear-gradient(135deg, ${C.red}, ${C.redDark})`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer", boxShadow: `0 4px 12px ${C.red}30` }}>{I.plus} New Project</button>
+              )}
+            </div>
+
+            {/* Stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
+              <StatCard label="Active Projects" value={activeProjects.length} sub={`${roleFiltered.length} total`} icon={I.building} accent={C.navy} />
+              <StatCard label="Total Contract Value" value={formatCurrency(totalContractValue)} icon={I.dollar} accent={C.green} />
+              <StatCard label="Delayed" value={delayedCount} sub={delayedCount > 0 ? "Needs attention" : "All on track"} icon={I.clock} accent={delayedCount > 0 ? C.yellow : C.green} />
+              <StatCard label="Margin At Risk" value={atRisk} sub={atRisk > 0 ? "Review budgets" : "All healthy"} icon={I.alert} accent={atRisk > 0 ? C.red : C.green} />
+            </div>
+
+            {/* Filters */}
+            <div style={{ display: "flex", gap: 12, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: C.white, border: `1px solid ${C.gray200}`, borderRadius: 8, flex: "1 1 240px", maxWidth: 320 }}>
+                <span style={{ color: C.gray400 }}>{I.search}</span>
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects or clients..." style={{ border: "none", outline: "none", fontSize: 13, color: C.navy, width: "100%", background: "transparent" }} />
+              </div>
+              <div style={{ display: "flex", gap: 4, background: C.white, border: `1px solid ${C.gray200}`, borderRadius: 8, padding: 3 }}>
+                {["All", ...MARKETS].map(m => <button key={m} onClick={() => setMarketFilter(m)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, background: marketFilter === m ? C.navy : "transparent", color: marketFilter === m ? C.white : C.gray500, cursor: "pointer", transition: "all 0.2s" }}>{m === "All" ? "All Markets" : MARKET_LABELS[m]}</button>)}
+              </div>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "8px 32px 8px 14px", border: `1px solid ${C.gray200}`, borderRadius: 8, fontSize: 12, fontWeight: 600, color: C.gray600, background: C.white, cursor: "pointer", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2394A3B8' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}>
+                <option value="All">All Statuses</option>
+                {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <span style={{ fontSize: 12, color: C.gray400, fontWeight: 500 }}>{filtered.length} project{filtered.length !== 1 ? "s" : ""}</span>
+            </div>
+
+            {/* Grid */}
+            {filtered.length > 0 ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
+                {filtered.map(p => <ProjectCard key={p.id} project={p} supers={supers} onClick={() => setSelectedProjectId(p.id)} />)}
+              </div>
+            ) : (
+              <div style={{ padding: "60px 0", textAlign: "center", background: C.white, borderRadius: 12, border: `1px solid ${C.gray200}` }}>
+                <p style={{ fontSize: 15, fontWeight: 600, color: C.gray500, margin: "0 0 4px" }}>No projects found</p>
+                <p style={{ fontSize: 13, color: C.gray400, margin: 0 }}>Try adjusting your filters or create a new project</p>
+              </div>
+            )}
+          </div>
+
+          {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} onCreate={handleCreate} supers={supers} />}
+          {selectedProject && <ProjectDetail project={selectedProject} onClose={() => setSelectedProjectId(null)} supers={supers} onUpdateProject={handleUpdateProject} />}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // APP ROOT
+    // ============================================================
+    function App() {
+      const [user, setUser] = useState(null);
+      return user ? <Dashboard user={user} onLogout={() => setUser(null)} /> : <LoginScreen onLogin={setUser} />;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
