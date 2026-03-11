@@ -547,7 +547,7 @@
           contentParts.push(...docToContentParts(DOC_TYPES[type]?.label || type, doc));
         }
         contentParts.push({ type: "text", text: EXTRACT_PROMPT });
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
+        const response = await fetch("/api/ai", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 2000, messages: [{ role: "user", content: contentParts }] }),
         });
@@ -883,7 +883,7 @@
           const sd = startDate || new Date().toISOString().split("T")[0];
           const prompt = "Generate a roofing construction schedule. Project: " + (project.name || "Roofing Project") + ", Type: " + (project.roofType || "Asphalt Shingles") + ", SqFt: " + (project.sqft || "Unknown") + ", Buildings: " + (project.buildings || 1) + ", Start: " + sd + (estCompletion ? ", End: " + estCompletion : "") + ". Return ONLY JSON array (no markdown): [{\"name\":\"Phase\",\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\",\"color\":\"#hex\"}]. Include: Mobilization, Tear-Off, Dry-In, Installation, Detail/Flashing, Cleanup. Colors: #6366F1,#EF4444,#F59E0B,#10B981,#3B82F6,#8B5CF6.";
 
-          const response = await fetch("https://api.anthropic.com/v1/messages", {
+          const response = await fetch("/api/ai", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
@@ -950,7 +950,7 @@
 
           const prompt = "You modify roofing construction schedules. Current schedule:\n" + scheduleText + "\n\nRespond with ONLY JSON (no markdown):\n{\"message\":\"what you changed\",\"schedule\":[{\"name\":\"...\",\"startDate\":\"YYYY-MM-DD\",\"endDate\":\"YYYY-MM-DD\",\"color\":\"#hex\",\"progress\":0}]}\n\nReturn ALL phases. Keep colors. User request: " + msg;
 
-          const response = await fetch("https://api.anthropic.com/v1/messages", {
+          const response = await fetch("/api/ai", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1220,7 +1220,7 @@ Return ONLY valid JSON (no markdown, no preamble) as an array:
 
 Include all materials needed: primary roofing material, underlayment, insulation (if applicable), fasteners, adhesives, flashing, edge metal, caulk/sealant, pipe boots, drains, and any accessories. Use realistic quantities based on the sq ft and roof type. Use realistic contractor pricing. Units can be: sq ft, rolls, sheets, bundles, boxes, gallons, tubes, each, linear ft.`;
 
-          const response = await fetch("https://api.anthropic.com/v1/messages", {
+          const response = await fetch("/api/ai", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
           });
@@ -1330,7 +1330,7 @@ Return ONLY valid JSON (no markdown) as an array of labor orders:
 
 Generate separate labor orders for each major work phase (e.g., Tear-Off, Installation, Detail Work). Each order should have a clear scope of work describing exactly what labor is expected. Use realistic minimum pay rates based on the roof type and square footage. The scope should be very detailed — include specific tasks, quality expectations, and cleanup requirements.`;
 
-          const response = await fetch("https://api.anthropic.com/v1/messages", {
+          const response = await fetch("/api/ai", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
           });
@@ -1913,7 +1913,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
 
 Extract every identifiable expense. Use the most specific category possible. If a date isn't clear, use today's date. Amount should be a positive number.` });
 
-          const response = await fetch("https://api.anthropic.com/v1/messages", {
+          const response = await fetch("/api/ai", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, messages: [{ role: "user", content: contentParts }] }),
           });
