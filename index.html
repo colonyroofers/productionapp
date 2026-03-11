@@ -268,10 +268,10 @@
     // CREATE PROJECT MODAL
     // ============================================================
     function CreateProjectModal({ onClose, onCreate, supers }) {
-      const [form, setForm] = useState({ name: "", client: "", market: "ATL", address: "", roofType: "TPO", sqft: "", contractValue: "", estimatedCost: "", assignedSuper: supers[0]?.id || "", startDate: "", estCompletion: "", buildings: "1" });
+      const [form, setForm] = useState({ name: "", client: "", market: "ATL", address: "", roofType: "TPO", sqft: "", contractValue: "", estimatedCost: "", assignedSuper: supers[0]?.id || "", buildings: "1" });
       const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
       const estimatedMargin = form.contractValue && form.estimatedCost ? Math.round(((form.contractValue - form.estimatedCost) / form.contractValue) * 100) : null;
-      const canSubmit = form.name && form.client && form.contractValue && form.estimatedCost && form.startDate;
+      const canSubmit = form.name && form.client && form.contractValue && form.estimatedCost;
       const fs = { width: "100%", padding: "10px 12px", border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, color: C.navy, outline: "none", boxSizing: "border-box" };
       const ls = { fontSize: 12, fontWeight: 600, color: C.gray600, marginBottom: 4, display: "block" };
 
@@ -306,8 +306,6 @@
                     <span style={{ fontSize: 13, fontWeight: 600, color: estimatedMargin >= 25 ? C.green : estimatedMargin >= 15 ? C.yellow : C.red }}>Estimated Profit Margin: {estimatedMargin}%</span>
                   </div>
                 )}
-                <div><label style={ls}>Start Date *</label><input style={fs} type="date" value={form.startDate} onChange={e => update("startDate", e.target.value)} /></div>
-                <div><label style={ls}>Est. Completion</label><input style={fs} type="date" value={form.estCompletion} onChange={e => update("estCompletion", e.target.value)} /></div>
                 <div style={{ gridColumn: "1/-1" }}><label style={ls}>Assigned Superintendent</label><select style={fs} value={form.assignedSuper} onChange={e => update("assignedSuper", e.target.value)}>{supers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
               </div>
               <div style={{ display: "flex", gap: 12, marginTop: 28, justifyContent: "flex-end" }}>
@@ -326,50 +324,66 @@
     const DOC_TYPES = {
       budget: { label: "Job Budget", desc: "Line-item cost breakdown & profit margin", icon: I.dollar, accept: ".pdf,.xlsx,.xls,.csv" },
       contract: { label: "Contract", desc: "Scope, terms, and contract value", icon: I.fileText, accept: ".pdf,.docx,.doc" },
-      plannedSet: { label: "Planned Set", desc: "Architectural drawings & blueprints", icon: I.layers, accept: ".pdf,.png,.jpg,.jpeg" },
+      planSet: { label: "Plan Set", desc: "Architectural drawings & blueprints", icon: I.layers, accept: ".pdf,.png,.jpg,.jpeg" },
     };
 
-    function DocumentUploadCard({ type, doc, onUpload, onRemove }) {
+    const MULTI_FILE_TYPES = ["contract", "planSet"];
+
+    function DocumentUploadCard({ type, files, onUpload, onRemove }) {
       const config = DOC_TYPES[type];
       const inputRef = useRef(null);
       const [dragOver, setDragOver] = useState(false);
-      const handleFiles = (files) => { if (files && files.length > 0) onUpload(type, files[0]); };
+      const isMulti = MULTI_FILE_TYPES.includes(type);
+      const fileList = Array.isArray(files) ? files : files ? [files] : [];
+      const hasFiles = fileList.length > 0;
+      const anyProcessing = fileList.some(f => f.status === "processing");
+      const allParsed = hasFiles && fileList.every(f => f.status === "parsed");
+      const anyError = fileList.some(f => f.status === "error");
+
+      const handleFiles = (inputFiles) => {
+        if (!inputFiles || inputFiles.length === 0) return;
+        Array.from(inputFiles).forEach(f => onUpload(type, f));
+      };
       const handleDrop = (e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); };
-      const statusColor = !doc ? C.gray400 : doc.status === "parsed" ? C.green : doc.status === "processing" ? C.blue : doc.status === "error" ? C.red : C.navy;
-      const statusLabel = !doc ? "Not uploaded" : doc.status === "parsed" ? "Parsed" : doc.status === "processing" ? "Processing..." : doc.status === "error" ? "Error" : "Uploaded";
+
+      const statusColor = !hasFiles ? C.gray400 : allParsed ? C.green : anyProcessing ? C.blue : anyError ? C.red : C.navy;
+      const statusLabel = !hasFiles ? "Not uploaded" : allParsed ? "Parsed" : anyProcessing ? "Processing..." : anyError ? "Error" : `${fileList.length} file${fileList.length > 1 ? "s" : ""}`;
 
       return (
-        <div style={{ border: `2px ${dragOver ? "solid" : "dashed"} ${dragOver ? C.red : doc ? C.gray200 : C.gray300}`, borderRadius: 12, background: dragOver ? C.redBg + "30" : C.white, transition: "all 0.2s", overflow: "hidden" }}
+        <div style={{ border: `2px ${dragOver ? "solid" : "dashed"} ${dragOver ? C.red : hasFiles ? C.gray200 : C.gray300}`, borderRadius: 12, background: dragOver ? C.redBg + "30" : C.white, transition: "all 0.2s", overflow: "hidden" }}
           onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
-          <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: doc ? `1px solid ${C.gray100}` : "none", background: doc ? C.gray50 : "transparent" }}>
+          <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: hasFiles ? `1px solid ${C.gray100}` : "none", background: hasFiles ? C.gray50 : "transparent" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: doc?.status === "parsed" ? C.greenBg : doc ? C.blueBg : C.gray100, color: doc?.status === "parsed" ? C.green : doc ? C.blue : C.gray400 }}>{config.icon}</div>
+              <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: allParsed ? C.greenBg : hasFiles ? C.blueBg : C.gray100, color: allParsed ? C.green : hasFiles ? C.blue : C.gray400 }}>{config.icon}</div>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>{config.label}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>{config.label}{isMulti && <span style={{ fontSize: 10, color: C.gray400, fontWeight: 400, marginLeft: 6 }}>Multiple files OK</span>}</div>
                 <div style={{ fontSize: 11, color: C.gray500 }}>{config.desc}</div>
               </div>
             </div>
-            <span style={{ fontSize: 11, fontWeight: 700, color: statusColor, padding: "3px 8px", borderRadius: 5, background: !doc ? C.gray100 : doc.status === "parsed" ? C.greenBg : doc.status === "processing" ? C.blueBg : doc.status === "error" ? C.redBg : C.gray100 }}>
-              {doc?.status === "processing" && <Spinner size={8} color={C.blue} />} {statusLabel}
+            <span style={{ fontSize: 11, fontWeight: 700, color: statusColor, padding: "3px 8px", borderRadius: 5, background: !hasFiles ? C.gray100 : allParsed ? C.greenBg : anyProcessing ? C.blueBg : anyError ? C.redBg : C.gray100 }}>
+              {anyProcessing && <Spinner size={8} color={C.blue} />} {statusLabel}
             </span>
           </div>
-          {!doc ? (
-            <div style={{ padding: "28px 18px", textAlign: "center", cursor: "pointer" }} onClick={() => inputRef.current?.click()}>
-              <div style={{ color: C.gray300, marginBottom: 8 }}>{I.upload}</div>
-              <p style={{ fontSize: 13, color: C.gray500, margin: "0 0 4px", fontWeight: 500 }}>Drag & drop or <span style={{ color: C.red, fontWeight: 600 }}>browse</span></p>
-              <p style={{ fontSize: 11, color: C.gray400, margin: 0 }}>Accepts: {config.accept.replace(/\./g, "").toUpperCase().split(",").join(", ")}</p>
-              <input ref={inputRef} type="file" accept={config.accept} style={{ display: "none" }} onChange={e => handleFiles(e.target.files)} />
-            </div>
-          ) : (
-            <div style={{ padding: "12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {fileList.map((doc, i) => (
+            <div key={i} style={{ padding: "10px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.gray100}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: C.gray400 }}>{I.file}</span>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: C.navy }}>{doc.name}</div>
-                  <div style={{ fontSize: 11, color: C.gray400 }}>{(doc.size / 1024).toFixed(0)} KB</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>{doc.name}</div>
+                  <div style={{ fontSize: 10, color: C.gray400 }}>{(doc.size / 1024).toFixed(0)} KB{doc.size > 4500000 ? " — Large file" : ""}</div>
                 </div>
               </div>
-              {doc.status !== "processing" && <button onClick={() => onRemove(type)} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400, padding: 4 }}>{I.trash}</button>}
+              {doc.status !== "processing" && <button onClick={() => onRemove(type, i)} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400, padding: 4 }}>{I.trash}</button>}
+            </div>
+          ))}
+          {(isMulti || !hasFiles) && (
+            <div style={{ padding: hasFiles ? "14px 18px" : "28px 18px", textAlign: "center", cursor: "pointer" }} onClick={() => inputRef.current?.click()}>
+              {!hasFiles && <div style={{ color: C.gray300, marginBottom: 8 }}>{I.upload}</div>}
+              <p style={{ fontSize: 12, color: C.gray500, margin: "0 0 3px", fontWeight: 500 }}>
+                {hasFiles ? <span style={{ color: C.red, fontWeight: 600 }}>+ Add another file</span> : <>Drag & drop or <span style={{ color: C.red, fontWeight: 600 }}>browse</span></>}
+              </p>
+              {!hasFiles && <p style={{ fontSize: 11, color: C.gray400, margin: 0 }}>Accepts: {config.accept.replace(/\./g, "").toUpperCase().split(",").join(", ")}</p>}
+              <input ref={inputRef} type="file" accept={config.accept} multiple={isMulti} style={{ display: "none" }} onChange={e => handleFiles(e.target.files)} />
             </div>
           )}
         </div>
@@ -382,8 +396,7 @@
     function ExtractionResults({ data, onApply }) {
       if (!data) return null;
       const Sec = ({ title, children }) => <div style={{ marginBottom: 16 }}><h4 style={{ fontSize: 11, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 8px" }}>{title}</h4>{children}</div>;
-      const Row = ({ label, value, highlight }) => <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${C.gray100}` }}><span style={{ fontSize: 13, color: C.gray500 }}>{label}</span><span style={{ fontSize: 13, fontWeight: 600, color: highlight || C.navy }}>{value || "—"}</span></div>;
-
+      const Row = ({ label, value, highlight }) => <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${C.gray100}` }}><span style={{ fontSize: 13, color: C.gray500 }}>{label}</span><span style={{ fontSize: 13, fontWeight: 600, color: highlight || C.navy }}>{value || "\u2014"}</span></div>;
       return (
         <div style={{ border: `1px solid ${C.green}40`, borderRadius: 12, overflow: "hidden", background: C.white }}>
           <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", background: C.greenBg, borderBottom: `1px solid ${C.green}30` }}>
@@ -428,7 +441,10 @@
     // DOCUMENTS TAB
     // ============================================================
     function DocumentsTab({ project, onUpdateProject }) {
-      const [docs, setDocs] = useState(project.documents || {});
+      const [docs, setDocs] = useState(() => {
+        const d = project.documents || {};
+        return { budget: d.budget || null, contract: Array.isArray(d.contract) ? d.contract : d.contract ? [d.contract] : [], planSet: Array.isArray(d.planSet) ? d.planSet : d.planSet ? [d.planSet] : [] };
+      });
       const [extractionData, setExtractionData] = useState(null);
       const [processing, setProcessing] = useState(false);
       const [error, setError] = useState(null);
@@ -436,77 +452,103 @@
       const handleUpload = (type, file) => {
         const reader = new FileReader();
         reader.onload = (e) => {
-          setDocs(prev => ({ ...prev, [type]: { name: file.name, size: file.size, type: file.type, status: "uploaded", data: e.target.result, uploadedAt: new Date().toISOString() } }));
+          const newDoc = { name: file.name, size: file.size, type: file.type, status: "uploaded", data: e.target.result, uploadedAt: new Date().toISOString() };
+          if (MULTI_FILE_TYPES.includes(type)) {
+            setDocs(prev => ({ ...prev, [type]: [...(prev[type] || []), newDoc] }));
+          } else {
+            setDocs(prev => ({ ...prev, [type]: newDoc }));
+          }
           setExtractionData(null);
         };
         reader.readAsDataURL(file);
       };
 
-      const handleRemove = (type) => { setDocs(prev => { const next = { ...prev }; delete next[type]; return next; }); setExtractionData(null); };
-      const uploadedCount = Object.keys(docs).filter(k => docs[k]).length;
+      const handleRemove = (type, idx) => {
+        if (MULTI_FILE_TYPES.includes(type)) {
+          setDocs(prev => ({ ...prev, [type]: prev[type].filter((_, i) => i !== idx) }));
+        } else {
+          setDocs(prev => ({ ...prev, [type]: null }));
+        }
+        setExtractionData(null);
+      };
+
+      const allDocs = () => {
+        const list = [];
+        if (docs.budget) list.push({ type: "budget", doc: docs.budget });
+        (docs.contract || []).forEach(d => list.push({ type: "contract", doc: d }));
+        (docs.planSet || []).forEach(d => list.push({ type: "planSet", doc: d }));
+        return list;
+      };
+      const uploadedCount = allDocs().length;
       const canProcess = uploadedCount >= 1;
+
+      const docToContentParts = (label, doc) => {
+        const parts = [];
+        const base64Data = doc.data.split(",")[1];
+        const mediaType = doc.type || "application/pdf";
+        const isExcel = mediaType.includes("spreadsheet") || mediaType.includes("excel") || doc.name.match(/\.(xlsx|xls|csv)$/i);
+        if (isExcel) {
+          try {
+            const binaryStr = atob(base64Data);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            const workbook = XLSX.read(bytes, { type: "array" });
+            let csvText = "";
+            workbook.SheetNames.forEach(sheetName => { csvText += "=== Sheet: " + sheetName + " ===\n" + XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName]) + "\n\n"; });
+            if (csvText.length > 30000) csvText = csvText.substring(0, 30000) + "\n...[truncated]";
+            parts.push({ type: "text", text: "[" + label + ": \"" + doc.name + "\" \u2014 Spreadsheet]\n\n" + csvText });
+          } catch (xlsErr) { parts.push({ type: "text", text: "[" + label + ": \"" + doc.name + "\" \u2014 Could not parse]" }); }
+        } else if (mediaType.startsWith("image/")) {
+          parts.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } });
+          parts.push({ type: "text", text: "[Image: " + label + " \"" + doc.name + "\"]" });
+        } else if (mediaType === "application/pdf") {
+          if (doc.size > 5000000) {
+            parts.push({ type: "text", text: "[" + label + ": \"" + doc.name + "\" \u2014 PDF too large (" + (doc.size / 1024 / 1024).toFixed(1) + "MB), skipped]" });
+          } else {
+            parts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Data } });
+            parts.push({ type: "text", text: "[PDF: " + label + " \"" + doc.name + "\"]" });
+          }
+        } else {
+          parts.push({ type: "text", text: "[" + label + ": \"" + doc.name + "\" \u2014 unsupported format]" });
+        }
+        return parts;
+      };
+
+      const setAllDocsStatus = (status) => {
+        setDocs(prev => ({
+          budget: prev.budget ? { ...prev.budget, status } : null,
+          contract: (prev.contract || []).map(d => ({ ...d, status })),
+          planSet: (prev.planSet || []).map(d => ({ ...d, status })),
+        }));
+      };
 
       const handleAIProcess = async () => {
         setProcessing(true); setError(null);
-        setDocs(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k]) next[k] = { ...next[k], status: "processing" }; }); return next; });
+        setAllDocsStatus("processing");
         try {
           const contentParts = [];
-          for (const [type, doc] of Object.entries(docs)) {
-            if (!doc) continue;
-            const label = DOC_TYPES[type]?.label || type;
-            const base64Data = doc.data.split(",")[1];
-            const mediaType = doc.type || "application/pdf";
-
-            const isExcel = mediaType.includes("spreadsheet") || mediaType.includes("excel") || doc.name.match(/\.(xlsx|xls|csv)$/i);
-
-            if (isExcel) {
-              // Convert Excel to CSV text using SheetJS
-              try {
-                const binaryStr = atob(base64Data);
-                const bytes = new Uint8Array(binaryStr.length);
-                for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-                const workbook = XLSX.read(bytes, { type: "array" });
-                let csvText = "";
-                workbook.SheetNames.forEach(sheetName => {
-                  csvText += `=== Sheet: ${sheetName} ===\n`;
-                  csvText += XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName]) + "\n\n";
-                });
-                contentParts.push({ type: "text", text: `[${label}: "${doc.name}" — Spreadsheet content below]\n\n${csvText}` });
-              } catch (xlsErr) {
-                console.error("Excel parse error:", xlsErr);
-                contentParts.push({ type: "text", text: `[${label}: "${doc.name}" — Could not parse spreadsheet]` });
-              }
-            } else if (mediaType.startsWith("image/")) {
-              contentParts.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } });
-              contentParts.push({ type: "text", text: `[The above image is the ${label}: "${doc.name}"]` });
-            } else if (mediaType === "application/pdf") {
-              contentParts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Data } });
-              contentParts.push({ type: "text", text: `[The above file is the ${label}: "${doc.name}"]` });
-            } else {
-              // Fallback: try to send as text
-              try {
-                const decoded = atob(base64Data);
-                contentParts.push({ type: "text", text: `[${label}: "${doc.name}"]\n\n${decoded}` });
-              } catch (e) {
-                contentParts.push({ type: "text", text: `[${label}: "${doc.name}" — unsupported file format]` });
-              }
-            }
+          for (const { type, doc } of allDocs()) {
+            contentParts.push(...docToContentParts(DOC_TYPES[type]?.label || type, doc));
           }
-          contentParts.push({ type: "text", text: `You are an AI assistant for Colony Roofers, a GAF President's Club roofing contractor. Analyze the uploaded documents and extract all relevant data.\n\nReturn ONLY valid JSON (no markdown fences) with this structure:\n{"contract":{"value":null,"scopeSummary":"","startDate":null,"duration":null},"budget":{"totalCost":null,"materialCost":null,"laborCost":null,"otherCost":null,"estimatedMargin":null,"lineItems":[]},"specs":{"roofType":null,"sqft":null,"buildingCount":null,"primaryMaterial":null,"system":null}}\n\nExtract what you can. Use null for unknown fields. Calculate estimatedMargin as ((contractValue - totalCost) / contractValue * 100) if both available.` });
+          contentParts.push({ type: "text", text: "You are an AI assistant for Colony Roofers, a GAF President's Club roofing contractor. Analyze ALL uploaded documents and extract relevant data.\n\nReturn ONLY valid JSON (no markdown fences):\n{\"contract\":{\"value\":null,\"scopeSummary\":\"\",\"startDate\":null,\"duration\":null},\"budget\":{\"totalCost\":null,\"materialCost\":null,\"laborCost\":null,\"otherCost\":null,\"estimatedMargin\":null,\"lineItems\":[]},\"specs\":{\"roofType\":null,\"sqft\":null,\"buildingCount\":null,\"primaryMaterial\":null,\"system\":null}}\n\nExtract what you can. Use null for unknown. Calculate estimatedMargin as ((contractValue - totalCost) / contractValue * 100) if both available." });
 
           const response = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: contentParts }] }),
+            body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 2000, messages: [{ role: "user", content: contentParts }] }),
           });
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.error?.message || "API returned status " + response.status);
+          }
           const result = await response.json();
           const textContent = result.content?.find(c => c.type === "text")?.text || "";
           const parsed = JSON.parse(textContent.replace(/```json|```/g, "").trim());
           setExtractionData(parsed);
-          setDocs(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k]) next[k] = { ...next[k], status: "parsed" }; }); return next; });
+          setAllDocsStatus("parsed");
         } catch (err) {
           console.error("AI processing error:", err);
-          setError("AI processing failed. Please check your documents and try again.");
-          setDocs(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k]) next[k] = { ...next[k], status: "error" }; }); return next; });
+          setError("AI processing failed: " + (err.message || "Unknown error") + ". Try removing large files or processing fewer documents.");
+          setAllDocsStatus("error");
         } finally { setProcessing(false); }
       };
 
@@ -526,15 +568,17 @@
       return (
         <div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
-            {Object.entries(DOC_TYPES).map(([type]) => <DocumentUploadCard key={type} type={type} doc={docs[type]} onUpload={handleUpload} onRemove={handleRemove} />)}
+            <DocumentUploadCard type="budget" files={docs.budget} onUpload={handleUpload} onRemove={handleRemove} />
+            <DocumentUploadCard type="contract" files={docs.contract} onUpload={handleUpload} onRemove={handleRemove} />
+            <DocumentUploadCard type="planSet" files={docs.planSet} onUpload={handleUpload} onRemove={handleRemove} />
           </div>
           <div style={{ marginBottom: 24 }}>
             <button onClick={handleAIProcess} disabled={!canProcess || processing} style={{ width: "100%", padding: "14px 0", borderRadius: 10, border: "none", background: canProcess && !processing ? `linear-gradient(135deg, ${C.navy}, ${C.navyLight})` : C.gray200, color: canProcess && !processing ? C.white : C.gray400, fontSize: 14, fontWeight: 600, cursor: canProcess && !processing ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: canProcess && !processing ? `0 4px 16px ${C.navy}30` : "none" }}>
               {processing ? <><Spinner size={16} /> Processing with AI...</> : <>{I.zap} Process Documents with AI</>}
             </button>
-            <p style={{ fontSize: 11, color: C.gray400, textAlign: "center", marginTop: 6 }}>{uploadedCount}/3 documents uploaded{uploadedCount < 3 && " — upload more for better extraction"}</p>
+            <p style={{ fontSize: 11, color: C.gray400, textAlign: "center", marginTop: 6 }}>{uploadedCount} document{uploadedCount !== 1 ? "s" : ""} uploaded</p>
           </div>
-          {error && <div style={{ padding: "12px 16px", borderRadius: 8, background: C.redBg, marginBottom: 20, display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: C.red }}>{I.alert}</span><span style={{ fontSize: 13, color: C.red, fontWeight: 500 }}>{error}</span></div>}
+          {error && <div style={{ padding: "12px 16px", borderRadius: 8, background: C.redBg, marginBottom: 20, display: "flex", alignItems: "flex-start", gap: 8 }}><span style={{ color: C.red, flexShrink: 0, marginTop: 1 }}>{I.alert}</span><span style={{ fontSize: 12, color: C.red, fontWeight: 500 }}>{error}</span></div>}
           <ExtractionResults data={extractionData} onApply={handleApply} />
         </div>
       );
@@ -762,10 +806,19 @@
       const chatEndRef = useRef(null);
       const chatInputRef = useRef(null);
 
+      // Project dates (editable here)
+      const [startDate, setStartDate] = useState(project.startDate || "");
+      const [estCompletion, setEstCompletion] = useState(project.estCompletion || "");
+
+      const handleDateChange = (field, value) => {
+        if (field === "startDate") { setStartDate(value); onUpdateProject({ startDate: value }); }
+        else { setEstCompletion(value); onUpdateProject({ estCompletion: value }); }
+      };
+
       useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory]);
 
-      const projectStart = hasSchedule ? phases.reduce((min, p) => p.startDate < min ? p.startDate : min, phases[0].startDate) : project.startDate || new Date().toISOString().split("T")[0];
-      const projectEnd = hasSchedule ? phases.reduce((max, p) => p.endDate > max ? p.endDate : max, phases[0].endDate) : project.estCompletion || addDays(projectStart, 30);
+      const projectStart = hasSchedule ? phases.reduce((min, p) => p.startDate < min ? p.startDate : min, phases[0].startDate) : startDate || new Date().toISOString().split("T")[0];
+      const projectEnd = hasSchedule ? phases.reduce((max, p) => p.endDate > max ? p.endDate : max, phases[0].endDate) : estCompletion || addDays(projectStart, 30);
 
       const handleGenerateAI = async () => {
         setGenerating(true); setGenError(null);
@@ -776,8 +829,8 @@ Project: ${project.name}
 Roof Type: ${project.roofType}
 Square Footage: ${project.sqft || "Unknown"}
 Buildings: ${project.buildings || 1}
-Start Date: ${project.startDate || new Date().toISOString().split("T")[0]}
-Estimated Completion: ${project.estCompletion || "Unknown"}
+Start Date: ${startDate || new Date().toISOString().split("T")[0]}
+Estimated Completion: ${estCompletion || "Unknown"}
 
 Return ONLY valid JSON (no markdown, no preamble) as an array of phases:
 [{"name":"Phase Name","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","color":"#hex"}]
@@ -793,12 +846,15 @@ Use realistic durations based on the roof type and size. Include phases like: Mo
           const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
           const withIds = parsed.map(p => ({ ...p, id: generateId(), progress: 0 }));
           setPhases(withIds);
-          onUpdateProject({ schedule: withIds, startDate: withIds[0]?.startDate, estCompletion: withIds[withIds.length - 1]?.endDate });
+          const newStart = withIds[0]?.startDate;
+          const newEnd = withIds[withIds.length - 1]?.endDate;
+          if (newStart) setStartDate(newStart);
+          if (newEnd) setEstCompletion(newEnd);
+          onUpdateProject({ schedule: withIds, startDate: newStart, estCompletion: newEnd });
         } catch (err) {
           console.error("Schedule generation error:", err);
           setGenError("Failed to generate schedule. Using default phases.");
-          // Fallback to default phases
-          const start = project.startDate || new Date().toISOString().split("T")[0];
+          const start = startDate || new Date().toISOString().split("T")[0];
           const fallback = DEFAULT_PHASES.map(p => ({ ...p, id: generateId(), startDate: addDays(start, p.daysOffset), endDate: addDays(start, p.daysOffset + p.durationDays), progress: 0 }));
           setPhases(fallback);
           onUpdateProject({ schedule: fallback });
@@ -862,14 +918,28 @@ Keep existing phase IDs when modifying. Generate new IDs (random 8-char string) 
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               model: "claude-sonnet-4-20250514", max_tokens: 1500,
-              system: systemPrompt,
-              messages: [{ role: "user", content: msg }],
+              messages: [{ role: "user", content: systemPrompt + "\n\nUser request: " + msg }],
             }),
           });
+
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.error?.message || "API error " + response.status);
+          }
+
           const result = await response.json();
           const text = result.content?.find(c => c.type === "text")?.text || "";
+
+          if (!text) throw new Error("Empty response from AI");
+
           const cleaned = text.replace(/```json|```/g, "").trim();
-          const parsed = JSON.parse(cleaned);
+          let parsed;
+          try { parsed = JSON.parse(cleaned); } catch (parseErr) {
+            // If JSON parse fails, the AI might have returned plain text
+            setChatHistory(prev => [...prev, { role: "assistant", text: cleaned || "I received your request but couldn't generate a schedule update. Try being more specific.", error: false }]);
+            setChatProcessing(false);
+            return;
+          }
 
           if (parsed.schedule && Array.isArray(parsed.schedule)) {
             const updatedPhases = parsed.schedule.map(p => ({ ...p, progress: p.progress || 0 }));
@@ -881,7 +951,7 @@ Keep existing phase IDs when modifying. Generate new IDs (random 8-char string) 
           }
         } catch (err) {
           console.error("Chat error:", err);
-          setChatHistory(prev => [...prev, { role: "assistant", text: "Sorry, I couldn't process that request. Try rephrasing your instruction.", error: true }]);
+          setChatHistory(prev => [...prev, { role: "assistant", text: "Error: " + (err.message || "Unknown error") + ". Try rephrasing your instruction.", error: true }]);
         } finally { setChatProcessing(false); }
       };
 
@@ -890,6 +960,20 @@ Keep existing phase IDs when modifying. Generate new IDs (random 8-char string) 
 
       return (
         <div>
+          {/* Project Dates */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20, padding: "16px 18px", borderRadius: 10, background: C.white, border: `1px solid ${C.gray200}` }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, marginBottom: 4, display: "block" }}>Project Start Date</label>
+              <input type="date" value={startDate} onChange={e => handleDateChange("startDate", e.target.value)}
+                style={{ width: "100%", padding: "10px 12px", border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, color: C.navy, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, marginBottom: 4, display: "block" }}>Estimated Completion</label>
+              <input type="date" value={estCompletion} onChange={e => handleDateChange("estCompletion", e.target.value)}
+                style={{ width: "100%", padding: "10px 12px", border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, color: C.navy, outline: "none", boxSizing: "border-box" }} />
+            </div>
+          </div>
+
           {/* Summary bar */}
           {hasSchedule && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
