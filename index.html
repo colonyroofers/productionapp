@@ -2276,8 +2276,39 @@ Extract every identifiable expense. Use the most specific category possible. If 
     // ============================================================
     // MAIN DASHBOARD
     // ============================================================
+
+    // Persistence helpers — strip large base64 doc data before saving
+    const STORAGE_KEY = "cr_production_projects";
+    const USERS_STORAGE_KEY = "cr_production_users";
+    const stripDocsForStorage = (projects) => projects.map(p => {
+      const clean = { ...p };
+      if (clean.documents) {
+        const docs = { ...clean.documents };
+        // Strip base64 data from stored docs — they'll need to be re-uploaded
+        if (docs.budget && docs.budget.data) docs.budget = { ...docs.budget, data: null, status: "uploaded" };
+        if (Array.isArray(docs.contract)) docs.contract = docs.contract.map(d => ({ ...d, data: null, status: "uploaded" }));
+        if (Array.isArray(docs.planSet)) docs.planSet = docs.planSet.map(d => ({ ...d, data: null, status: "uploaded" }));
+        clean.documents = docs;
+      }
+      return clean;
+    });
+    const loadProjects = () => {
+      try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : INITIAL_PROJECTS; }
+      catch(e) { return INITIAL_PROJECTS; }
+    };
+    const saveProjects = (projects) => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(stripDocsForStorage(projects))); } catch(e) {}
+    };
+    const loadUsers = () => {
+      try { const s = localStorage.getItem(USERS_STORAGE_KEY); return s ? JSON.parse(s) : USERS.map(u => ({ ...u })); }
+      catch(e) { return USERS.map(u => ({ ...u })); }
+    };
+    const saveUsers = (users) => {
+      try { localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users)); } catch(e) {}
+    };
+
     function Dashboard({ user, onLogout }) {
-      const [projects, setProjects] = useState(INITIAL_PROJECTS);
+      const [projects, setProjects] = useState(loadProjects);
       const [marketFilter, setMarketFilter] = useState("All");
       const [statusFilter, setStatusFilter] = useState("All");
       const [search, setSearch] = useState("");
@@ -2285,9 +2316,13 @@ Extract every identifiable expense. Use the most specific category possible. If 
       const [selectedProjectId, setSelectedProjectId] = useState(null);
       const [showArchived, setShowArchived] = useState(false);
       const [showUserMgmt, setShowUserMgmt] = useState(false);
-      const [managedUsers, setManagedUsers] = useState(USERS.map(u => ({ ...u })));
+      const [managedUsers, setManagedUsers] = useState(loadUsers);
       const supers = managedUsers.filter(u => u.role === "superintendent");
       const selectedProject = selectedProjectId ? projects.find(p => p.id === selectedProjectId) : null;
+
+      // Auto-save projects whenever they change
+      useEffect(() => { saveProjects(projects); }, [projects]);
+      useEffect(() => { saveUsers(managedUsers); }, [managedUsers]);
 
       const roleFiltered = user.role === "superintendent" ? projects.filter(p => p.assignedSuper === user.id) : projects;
       const activeOrArchived = roleFiltered.filter(p => showArchived ? p.archived : !p.archived);
