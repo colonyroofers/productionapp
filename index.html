@@ -45,6 +45,31 @@
     const STATUSES = ["Pre-Construction", "In Progress", "Delayed", "Complete"];
     const ROOF_TYPES = ["TPO", "Asphalt Shingles", "Single-Ply Membrane", "Modified Bitumen", "Built-Up Roofing"];
 
+    // Vendor Catalog
+    const VENDOR_CATALOG = {
+      materials: [
+        { name: "ABC Supply", type: "Distributor", notes: "Primary shingle & accessories" },
+        { name: "Beacon Roofing Supply", type: "Distributor", notes: "Full line distributor" },
+        { name: "SRS Distribution", type: "Distributor", notes: "Commercial & residential" },
+        { name: "GAF", type: "Manufacturer", notes: "President's Club — Shingles" },
+        { name: "Carlisle", type: "Manufacturer", notes: "TPO & single-ply membranes" },
+        { name: "Johns Manville", type: "Manufacturer", notes: "TPO & insulation" },
+        { name: "Elevate (Firestone)", type: "Manufacturer", notes: "Low slope systems" },
+        { name: "CertainTeed", type: "Manufacturer", notes: "Shingles" },
+        { name: "Owens Corning", type: "Manufacturer", notes: "Shingles & insulation" },
+        { name: "Other", type: "Other", notes: "" },
+      ],
+      labor: [
+        { name: "TBD — From Approved List", type: "Subcontractor" },
+        { name: "Other — Pending Approval", type: "Subcontractor" },
+      ],
+      equipment: [
+        { name: "Sunbelt Rentals", type: "Equipment Rental" },
+        { name: "United Rentals", type: "Equipment Rental" },
+        { name: "Other", type: "Other" },
+      ],
+    };
+
     const generateId = () => Math.random().toString(36).substring(2, 10);
 
     const INITIAL_PROJECTS = [
@@ -402,8 +427,8 @@
       return (
         <div style={{ border: `1px solid ${C.green}40`, borderRadius: 12, overflow: "hidden", background: C.white }}>
           <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", background: C.greenBg, borderBottom: `1px solid ${C.green}30` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: C.green }}>{I.zap}</span><span style={{ fontSize: 14, fontWeight: 700, color: C.green }}>AI Extraction Complete</span></div>
-            <button onClick={onApply} style={{ padding: "7px 16px", borderRadius: 7, border: "none", background: C.green, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Apply to Project</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ color: C.green }}>{I.check}</span><span style={{ fontSize: 14, fontWeight: 700, color: C.green }}>Extracted &amp; Applied to Project</span></div>
+            <button onClick={onApply} style={{ padding: "7px 16px", borderRadius: 7, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
           </div>
           <div style={{ padding: "16px 18px" }}>
             {data.contract && <Sec title="Contract Details">
@@ -629,8 +654,31 @@
             results.push(batchResult);
           }
           const finalResult = results.length === 1 ? results[0] : mergeResults(results);
+          // Auto-apply: save document metadata + extracted data to project immediately
+          const savedDocs = {
+            budget: docs.budget ? { name: docs.budget.name, size: docs.budget.size, type: docs.budget.type, uploadedAt: docs.budget.uploadedAt, status: "processed" } : (project.documents?.budget || null),
+            contract: [
+              ...(Array.isArray(project.documents?.contract) ? project.documents.contract : []),
+              ...(docs.contract || []).map(d => ({ name: d.name, size: d.size, type: d.type, uploadedAt: d.uploadedAt, status: "processed" })),
+            ],
+            planSet: [
+              ...(Array.isArray(project.documents?.planSet) ? project.documents.planSet : []),
+              ...(docs.planSet || []).map(d => ({ name: d.name, size: d.size, type: d.type, uploadedAt: d.uploadedAt, status: "processed" })),
+            ],
+          };
+          const u = { documents: savedDocs, extractionData: finalResult };
+          if (finalResult.contract?.value) u.contractValue = finalResult.contract.value;
+          if (finalResult.budget?.totalCost) u.estimatedCost = finalResult.budget.totalCost;
+          if (finalResult.budget?.estimatedMargin) { u.estimatedMargin = finalResult.budget.estimatedMargin; u.currentMargin = finalResult.budget.estimatedMargin; }
+          if (finalResult.specs?.roofType) u.roofType = finalResult.specs.roofType;
+          if (finalResult.specs?.sqft) u.sqft = finalResult.specs.sqft;
+          if (finalResult.specs?.buildingCount) u.buildings = finalResult.specs.buildingCount;
+          if (finalResult.contract?.startDate) u.startDate = finalResult.contract.startDate;
+          if (finalResult.budget?.lineItems?.length) u.budgetLineItems = finalResult.budget.lineItems.map((li, i) => ({ ...li, id: generateId(), category: li.category || "Materials" }));
+          onUpdateProject(u);
+          // Show results briefly, then clear upload area
           setExtractionData(finalResult);
-          setAllDocsStatus("parsed");
+          setDocs({ budget: null, contract: [], planSet: [] });
         } catch (err) {
           console.error("AI processing error:", err);
           setError("AI processing failed: " + (err.message || "Unknown error") + ". Try processing fewer documents at once.");
@@ -639,20 +687,40 @@
       };
 
       const handleApply = () => {
-        if (!extractionData) return;
-        const u = { documents: docs };
-        if (extractionData.contract?.value) u.contractValue = extractionData.contract.value;
-        if (extractionData.budget?.totalCost) u.estimatedCost = extractionData.budget.totalCost;
-        if (extractionData.budget?.estimatedMargin) { u.estimatedMargin = extractionData.budget.estimatedMargin; u.currentMargin = extractionData.budget.estimatedMargin; }
-        if (extractionData.specs?.roofType) u.roofType = extractionData.specs.roofType;
-        if (extractionData.specs?.sqft) u.sqft = extractionData.specs.sqft;
-        if (extractionData.specs?.buildingCount) u.buildings = extractionData.specs.buildingCount;
-        if (extractionData.contract?.startDate) u.startDate = extractionData.contract.startDate;
-        onUpdateProject(u);
+        // Data already auto-applied during processing — just dismiss the results view
+        setExtractionData(null);
+        setError(null);
       };
 
       return (
         <div>
+          {/* Previously processed documents */}
+          {(() => {
+            const pd = project.documents || {};
+            const savedDocs = [
+              ...(pd.budget ? [pd.budget] : []),
+              ...(Array.isArray(pd.contract) ? pd.contract : []),
+              ...(Array.isArray(pd.planSet) ? pd.planSet : []),
+            ].filter(d => d && d.name && d.status === "processed");
+            if (savedDocs.length === 0) return null;
+            return (
+              <div style={{ marginBottom: 24, padding: "16px 18px", borderRadius: 12, background: C.gray50, border: `1px solid ${C.gray200}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ color: C.green }}>{I.check}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>Processed Documents ({savedDocs.length})</span>
+                </div>
+                {savedDocs.map((doc, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < savedDocs.length - 1 ? `1px solid ${C.gray200}` : "none" }}>
+                    <span style={{ color: C.green }}>{I.file}</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: C.gray600 }}>{doc.name}</span>
+                    <span style={{ fontSize: 10, color: C.gray400 }}>({(doc.size / 1024).toFixed(0)} KB)</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Upload new documents */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
             <DocumentUploadCard type="budget" files={docs.budget} onUpload={handleUpload} onRemove={handleRemove} />
             <DocumentUploadCard type="contract" files={docs.contract} onUpload={handleUpload} onRemove={handleRemove} />
@@ -666,6 +734,14 @@
           </div>
           {error && <div style={{ padding: "12px 16px", borderRadius: 8, background: C.redBg, marginBottom: 20, display: "flex", alignItems: "flex-start", gap: 8 }}><span style={{ color: C.red, flexShrink: 0, marginTop: 1 }}>{I.alert}</span><span style={{ fontSize: 12, color: C.red, fontWeight: 500 }}>{error}</span></div>}
           <ExtractionResults data={extractionData} onApply={handleApply} />
+          {!extractionData && project.extractionData && (
+            <div style={{ border: `1px solid ${C.gray200}`, borderRadius: 12, padding: "14px 18px", background: C.gray50, marginTop: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ color: C.green }}>{I.zap}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.gray600 }}>Previously extracted data has been applied to this project.</span>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -1200,6 +1276,12 @@
         <tr style={{ borderBottom: `1px solid ${C.gray100}` }}>
           <td style={{ padding: "8px 6px" }}><input style={fs} value={item.material} onChange={e => onUpdate(idx, "material", e.target.value)} /></td>
           <td style={{ padding: "8px 6px" }}><input style={fs} value={item.spec} onChange={e => onUpdate(idx, "spec", e.target.value)} /></td>
+          <td style={{ padding: "8px 4px", width: 130 }}>
+            <select style={{ ...fs, fontSize: 11 }} value={item.vendor || ""} onChange={e => onUpdate(idx, "vendor", e.target.value)}>
+              <option value="">Select vendor...</option>
+              {VENDOR_CATALOG.materials.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+            </select>
+          </td>
           <td style={{ padding: "8px 4px", width: 70 }}><input style={{ ...fs, textAlign: "right" }} type="number" value={item.qty} onChange={e => onUpdate(idx, "qty", Number(e.target.value))} /></td>
           <td style={{ padding: "8px 4px", width: 60 }}><input style={fs} value={item.unit} onChange={e => onUpdate(idx, "unit", e.target.value)} /></td>
           <td style={{ padding: "8px 4px", width: 85 }}><input style={{ ...fs, textAlign: "right" }} type="number" value={item.unitCost} onChange={e => onUpdate(idx, "unitCost", Number(e.target.value))} /></td>
@@ -1218,6 +1300,7 @@
     function MaterialOrder({ project, materials, setMaterials, onUpdateProject }) {
       const [generating, setGenerating] = useState(false);
       const hasMaterials = materials.length > 0;
+      const hasBudget = (project.budgetLineItems || []).length > 0;
 
       const handleUpdate = (idx, field, value) => {
         const updated = [...materials];
@@ -1225,11 +1308,26 @@
         setMaterials(updated);
       };
       const handleRemove = (idx) => { setMaterials(materials.filter((_, i) => i !== idx)); };
-      const handleAdd = () => { setMaterials([...materials, { material: "", spec: "", qty: 0, unit: "sq ft", unitCost: 0, status: "Pending", notes: "" }]); };
+      const handleAdd = () => { setMaterials([...materials, { material: "", spec: "", qty: 0, unit: "sq ft", unitCost: 0, status: "Pending", vendor: "", notes: "" }]); };
       const totalCost = materials.reduce((s, m) => s + (m.qty || 0) * (m.unitCost || 0), 0);
 
-      const handleSave = () => {
-        onUpdateProject({ materialOrder: materials });
+      const handleSave = () => { onUpdateProject({ materialOrder: materials }); };
+
+      // Create from Budget — pull material-related budget line items
+      const handleCreateFromBudget = () => {
+        const budgetItems = project.budgetLineItems || [];
+        const materialItems = budgetItems.filter(li => li.category === "Materials" || li.category === "Equipment" || (!li.category || li.category === "Other"));
+        const newMaterials = materialItems.map(li => ({
+          material: li.description || "",
+          spec: "",
+          qty: 1,
+          unit: "each",
+          unitCost: li.amount || 0,
+          status: "Pending",
+          vendor: "",
+          notes: "From job budget",
+        }));
+        setMaterials(newMaterials);
       };
 
       const handleGenerate = async () => {
@@ -1283,6 +1381,7 @@ Include all materials needed: primary roofing material, underlayment, insulation
             <h4 style={{ fontSize: 14, fontWeight: 700, color: C.navy, margin: 0 }}>Material Order</h4>
             <div style={{ display: "flex", gap: 6 }}>
               {hasMaterials && <button onClick={handleExport} style={{ padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Export</button>}
+              {hasBudget && <button onClick={handleCreateFromBudget} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.green}50`, background: C.greenBg, color: C.green, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{I.dollar} From Budget</button>}
               <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.navy}30`, background: C.navy + "08", color: C.navy, fontSize: 11, fontWeight: 600, cursor: generating ? "default" : "pointer" }}>
                 {generating ? <Spinner size={10} color={C.navy} /> : I.zap} {hasMaterials ? "Regenerate" : "Generate"} with AI
               </button>
@@ -1297,6 +1396,7 @@ Include all materials needed: primary roofing material, underlayment, insulation
                     <tr style={{ background: C.gray50 }}>
                       <th style={{ padding: "10px 6px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", letterSpacing: "0.05em" }}>Material</th>
                       <th style={{ padding: "10px 6px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Spec</th>
+                      <th style={{ padding: "10px 4px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 130 }}>Vendor</th>
                       <th style={{ padding: "10px 4px", textAlign: "right", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 70 }}>Qty</th>
                       <th style={{ padding: "10px 4px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 60 }}>Unit</th>
                       <th style={{ padding: "10px 4px", textAlign: "right", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 85 }}>Unit $</th>
@@ -1310,7 +1410,7 @@ Include all materials needed: primary roofing material, underlayment, insulation
                   </tbody>
                   <tfoot>
                     <tr style={{ background: C.gray50 }}>
-                      <td colSpan="5" style={{ padding: "10px 6px", textAlign: "right", fontSize: 12, fontWeight: 700, color: C.gray500 }}>Total Material Cost:</td>
+                      <td colSpan="6" style={{ padding: "10px 6px", textAlign: "right", fontSize: 12, fontWeight: 700, color: C.gray500 }}>Total Material Cost:</td>
                       <td style={{ padding: "10px 4px", textAlign: "right", fontSize: 14, fontWeight: 800, color: C.navy }}>{formatCurrency(totalCost)}</td>
                       <td colSpan="2"></td>
                     </tr>
@@ -1324,8 +1424,9 @@ Include all materials needed: primary roofing material, underlayment, insulation
             </>
           ) : (
             <div style={{ padding: "32px 16px", textAlign: "center", background: C.white, borderRadius: 10, border: `2px dashed ${C.gray300}` }}>
-              <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 12px" }}>No material order yet. Generate one from project specs or add items manually.</p>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 12px" }}>No material order yet. Create from your job budget, generate with AI, or add items manually.</p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                {hasBudget && <button onClick={handleCreateFromBudget} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none", background: C.green, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{I.dollar} Create from Budget</button>}
                 <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                   {generating ? <Spinner size={12} /> : I.zap} Generate with AI
                 </button>
@@ -1342,6 +1443,29 @@ Include all materials needed: primary roofing material, underlayment, insulation
       const [generating, setGenerating] = useState(false);
       const [editIdx, setEditIdx] = useState(null);
       const hasOrders = laborOrders.length > 0;
+      const hasBudget = (project.budgetLineItems || []).length > 0;
+
+      // Create from Budget — pull labor-related budget line items
+      const handleCreateFromBudget = () => {
+        const budgetItems = project.budgetLineItems || [];
+        const laborItems = budgetItems.filter(li => li.category === "Labor");
+        if (laborItems.length === 0) {
+          alert("No labor line items found in the job budget. Categorize budget items as 'Labor' in the Budget tab first.");
+          return;
+        }
+        const newOrders = laborItems.map(li => ({
+          id: generateId(),
+          title: li.description || "Labor Order",
+          scope: "Scope from budget: " + (li.description || ""),
+          sqft: project.sqft || 0,
+          minPay: li.amount || 0,
+          subcontractor: "TBD — From Approved List",
+          startDate: project.startDate || "",
+          endDate: "",
+          notes: "Created from job budget",
+        }));
+        setLaborOrders(newOrders);
+      };
 
       const handleGenerate = async () => {
         setGenerating(true);
@@ -1437,6 +1561,7 @@ Colony Roofers LLC — GAF President's Club Contractor
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <h4 style={{ fontSize: 14, fontWeight: 700, color: C.navy, margin: 0 }}>Labor Orders</h4>
             <div style={{ display: "flex", gap: 6 }}>
+              {hasBudget && <button onClick={handleCreateFromBudget} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.green}50`, background: C.greenBg, color: C.green, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{I.dollar} From Budget</button>}
               <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.navy}30`, background: C.navy + "08", color: C.navy, fontSize: 11, fontWeight: 600, cursor: generating ? "default" : "pointer" }}>
                 {generating ? <Spinner size={10} color={C.navy} /> : I.zap} {hasOrders ? "Regenerate" : "Generate"} with AI
               </button>
@@ -1473,7 +1598,7 @@ Colony Roofers LLC — GAF President's Club Contractor
                             <div><label style={ls}>Square Footage</label><input style={fs} type="number" value={order.sqft || 0} onChange={e => handleUpdateOrder(idx, "sqft", Number(e.target.value))} /></div>
                             <div><label style={ls}>Minimum Pay</label><input style={fs} type="number" value={order.minPay || 0} onChange={e => handleUpdateOrder(idx, "minPay", Number(e.target.value))} /></div>
                           </div>
-                          <div><label style={ls}>Subcontractor</label><input style={fs} value={order.subcontractor} onChange={e => handleUpdateOrder(idx, "subcontractor", e.target.value)} /></div>
+                          <div><label style={ls}>Subcontractor</label><select style={fs} value={order.subcontractor || ""} onChange={e => handleUpdateOrder(idx, "subcontractor", e.target.value)}><option value="">Select subcontractor...</option>{VENDOR_CATALOG.labor.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}</select></div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                             <div><label style={ls}>Start Date</label><input style={fs} type="date" value={order.startDate || ""} onChange={e => handleUpdateOrder(idx, "startDate", e.target.value)} /></div>
                             <div><label style={ls}>End Date</label><input style={fs} type="date" value={order.endDate || ""} onChange={e => handleUpdateOrder(idx, "endDate", e.target.value)} /></div>
@@ -1495,8 +1620,9 @@ Colony Roofers LLC — GAF President's Club Contractor
             </>
           ) : (
             <div style={{ padding: "32px 16px", textAlign: "center", background: C.white, borderRadius: 10, border: `2px dashed ${C.gray300}` }}>
-              <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 12px" }}>No labor orders yet. Generate them from project specs or create manually.</p>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 12px" }}>No labor orders yet. Create from your job budget, generate with AI, or add manually.</p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                {hasBudget && <button onClick={handleCreateFromBudget} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none", background: C.green, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{I.dollar} Create from Budget</button>}
                 <button onClick={handleGenerate} disabled={generating} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                   {generating ? <Spinner size={12} /> : I.zap} Generate with AI
                 </button>
@@ -1885,6 +2011,8 @@ Colony Roofers LLC — GAF President's Club Contractor
       const [editIdx, setEditIdx] = useState(null);
       const [showAddManual, setShowAddManual] = useState(false);
       const [manualForm, setManualForm] = useState({ vendor: "", amount: "", date: new Date().toISOString().split("T")[0], category: "Materials", description: "" });
+      const [budgetItems, setBudgetItems] = useState(project.budgetLineItems || []);
+      const [showBudget, setShowBudget] = useState(true);
 
       const EXPENSE_CATS = ["Materials", "Labor", "Equipment", "Permits", "Dumpsters", "Forklifts", "Warranty", "Other"];
       const catColors = { Materials: "#3B82F6", Labor: "#10B981", Equipment: "#F59E0B", Permits: "#8B5CF6", Dumpsters: "#EC4899", Forklifts: "#14B8A6", Warranty: "#6366F1", Other: "#94A3B8" };
@@ -2051,6 +2179,74 @@ Extract every identifiable expense. Use the most specific category possible. If 
               <span style={{ fontSize: 10, color: C.gray400 }}>{formatCurrency(estimatedCost)}</span>
             </div>
           </div>
+
+          {/* Job Budget Line Items — editable from uploaded budget document */}
+          {(() => {
+            const budgetTotal = budgetItems.reduce((s, li) => s + (li.amount || 0), 0);
+            const handleBudgetUpdate = (id, field, value) => {
+              const updated = budgetItems.map(li => li.id === id ? { ...li, [field]: field === "amount" ? Number(value) : value } : li);
+              setBudgetItems(updated);
+              onUpdateProject({ budgetLineItems: updated, estimatedCost: updated.reduce((s, li) => s + (li.amount || 0), 0) });
+            };
+            const handleBudgetRemove = (id) => {
+              const updated = budgetItems.filter(li => li.id !== id);
+              setBudgetItems(updated);
+              onUpdateProject({ budgetLineItems: updated, estimatedCost: updated.reduce((s, li) => s + (li.amount || 0), 0) });
+            };
+            const handleBudgetAdd = () => {
+              const newItem = { id: generateId(), description: "", amount: 0, category: "Materials" };
+              const updated = [...budgetItems, newItem];
+              setBudgetItems(updated);
+              onUpdateProject({ budgetLineItems: updated });
+            };
+            if (budgetItems.length === 0) return (
+              <div style={{ marginBottom: 20, padding: "20px", borderRadius: 10, border: `2px dashed ${C.gray300}`, textAlign: "center" }}>
+                <p style={{ fontSize: 13, color: C.gray400, margin: "0 0 4px", fontWeight: 600 }}>No Job Budget Uploaded</p>
+                <p style={{ fontSize: 11, color: C.gray400, margin: 0 }}>Upload a budget document in the Documents tab to see line items here.</p>
+              </div>
+            );
+            return (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <button onClick={() => setShowBudget(!showBudget)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 700, color: C.navy, margin: 0 }}>Job Budget ({budgetItems.length} items)</h4>
+                    <span style={{ fontSize: 10, color: C.gray400 }}>{showBudget ? "▲" : "▼"}</span>
+                  </button>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: C.navy }}>{formatCurrency(budgetTotal)}</span>
+                </div>
+                {showBudget && (
+                  <>
+                    <div style={{ borderRadius: 10, border: `1px solid ${C.gray200}`, overflow: "hidden", background: C.white }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead><tr style={{ background: C.gray50 }}>
+                          <th style={{ padding: "10px 10px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Description</th>
+                          <th style={{ padding: "10px 6px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 120 }}>Category</th>
+                          <th style={{ padding: "10px 6px", textAlign: "right", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase", width: 110 }}>Amount</th>
+                          <th style={{ width: 32 }}></th>
+                        </tr></thead>
+                        <tbody>
+                          {budgetItems.map(li => (
+                            <tr key={li.id} style={{ borderTop: `1px solid ${C.gray100}` }}>
+                              <td style={{ padding: "6px 10px" }}><input value={li.description || ""} onChange={e => handleBudgetUpdate(li.id, "description", e.target.value)} style={{ width: "100%", border: "none", background: "transparent", fontSize: 12, color: C.navy, fontWeight: 500, outline: "none", padding: "4px 0" }} /></td>
+                              <td style={{ padding: "6px 6px" }}><select value={li.category || "Materials"} onChange={e => handleBudgetUpdate(li.id, "category", e.target.value)} style={{ width: "100%", border: "none", background: "transparent", fontSize: 11, color: C.gray600, outline: "none" }}>{EXPENSE_CATS.map(c => <option key={c} value={c}>{c}</option>)}</select></td>
+                              <td style={{ padding: "6px 6px", textAlign: "right" }}><input type="number" value={li.amount || 0} onChange={e => handleBudgetUpdate(li.id, "amount", e.target.value)} style={{ width: 90, border: "none", background: "transparent", fontSize: 12, color: C.navy, fontWeight: 700, outline: "none", textAlign: "right", padding: "4px 0" }} /></td>
+                              <td style={{ padding: "6px 4px" }}><button onClick={() => handleBudgetRemove(li.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400, padding: 2, fontSize: 10 }}>{I.x}</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot><tr style={{ background: C.gray50 }}>
+                          <td colSpan="2" style={{ padding: "10px 10px", textAlign: "right", fontSize: 12, fontWeight: 700, color: C.gray500 }}>Total Estimated Cost:</td>
+                          <td style={{ padding: "10px 6px", textAlign: "right", fontSize: 14, fontWeight: 800, color: C.navy }}>{formatCurrency(budgetTotal)}</td>
+                          <td></td>
+                        </tr></tfoot>
+                      </table>
+                    </div>
+                    <button onClick={handleBudgetAdd} style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{I.plus} Add Line Item</button>
+                  </>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Category Breakdown */}
           {catBreakdown.length > 0 && (
