@@ -11,6 +11,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -52,17 +55,11 @@
       if (firebaseLoaded) return true;
       try {
         if (!FIREBASE_CONFIG) { const ok = await loadFirebaseConfig(); if (!ok) return false; }
-        const [appMod, authMod, fsMod] = await Promise.all([
-          import("https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js"),
-          import("https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js"),
-          import("https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js"),
-        ]);
-        firebaseApp = appMod.initializeApp(FIREBASE_CONFIG);
-        firebaseAuth = authMod.getAuth(firebaseApp);
-        googleProvider = new authMod.GoogleAuthProvider();
-        firestoreDb = fsMod.getFirestore(firebaseApp);
-        window._fbAuth = authMod;
-        window._fbFs = fsMod;
+        if (!window.firebase) { console.error("Firebase SDK not loaded"); return false; }
+        firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
+        firebaseAuth = firebase.auth();
+        googleProvider = new firebase.auth.GoogleAuthProvider();
+        firestoreDb = firebase.firestore();
         firebaseLoaded = true;
         return true;
       } catch (e) { console.error("Firebase load error:", e); return false; }
@@ -76,7 +73,7 @@
         let unsub = null;
         loadFirebase().then(ok => {
           if (!ok) { setError("Firebase load failed"); setLoading(false); return; }
-          unsub = window._fbAuth.onAuthStateChanged(firebaseAuth, fb => {
+          unsub = firebaseAuth.onAuthStateChanged(fb => {
             setUser(fb ? { name: fb.displayName, email: fb.email, picture: fb.photoURL, uid: fb.uid } : null);
             setLoading(false);
           });
@@ -84,10 +81,10 @@
         return () => { if (unsub) unsub(); };
       }, []);
       const signIn = useCallback(async () => {
-        try { setError(null); await window._fbAuth.signInWithPopup(firebaseAuth, googleProvider); }
+        try { setError(null); await firebaseAuth.signInWithPopup(googleProvider); }
         catch (e) { if (e.code !== "auth/popup-closed-by-user") setError("Sign-in failed: " + e.message); }
       }, []);
-      const signOut = useCallback(async () => { if (firebaseAuth) await window._fbAuth.signOut(firebaseAuth); }, []);
+      const signOut = useCallback(async () => { if (firebaseAuth) await firebaseAuth.signOut(); }, []);
       return { user, loading, error, signIn, signOut };
     }
 
@@ -268,20 +265,18 @@
       const id = data.id || "sub_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
       const record = { ...data, id, updatedAt: new Date().toISOString(), createdAt: data.createdAt || new Date().toISOString() };
       try {
-        const fs = window._fbFs;
-        await fs.setDoc(fs.doc(firestoreDb, "submissions", id), record);
+        await firestoreDb.collection("submissions").doc(id).set(record);
         return record;
       } catch (e) { console.error("Save failed:", e); return null; }
     }
     async function loadAllSubmissions() {
       try {
-        const fs = window._fbFs;
-        const snap = await fs.getDocs(fs.query(fs.collection(firestoreDb, "submissions"), fs.orderBy("createdAt", "desc")));
+        const snap = await firestoreDb.collection("submissions").orderBy("createdAt", "desc").get();
         const subs = []; snap.forEach(d => subs.push(d.data())); return subs;
       } catch (e) { console.error("Load failed:", e); return []; }
     }
     async function deleteSubmission(id) {
-      try { const fs = window._fbFs; await fs.deleteDoc(fs.doc(firestoreDb, "submissions", id)); return true; }
+      try { await firestoreDb.collection("submissions").doc(id).delete(); return true; }
       catch (e) { return false; }
     }
 
