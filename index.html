@@ -533,6 +533,7 @@
         startDate: "2026-01-05", estCompletion: "2026-02-28", progress: 100,
         buildings: 12, createdAt: "2025-12-20", documents: {}
       },
+    ];
 
     // --- Production Utilities ---
     // --- Utilities ---
@@ -542,7 +543,7 @@
       if (drop >= 5) return "warning";
       return "healthy";
     };
-    const formatCurrency = (val) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
+    // formatCurrency already defined in shared section
     const formatDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
     // --- Icons ---
