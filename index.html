@@ -34,14 +34,16 @@
     // ============================================================
 
     // ─── FIREBASE CONFIG ───────────────────────────────────────
-    const FIREBASE_CONFIG = {
-      apiKey: "AIzaSyCawWMq5X2OpWsmplOYxrR6bhyHeAzXKFw",
-      authDomain: "colony-inspection-app.firebaseapp.com",
-      projectId: "colony-inspection-app",
-      storageBucket: "colony-inspection-app.firebasestorage.app",
-      messagingSenderId: "869437682472",
-      appId: "1:869437682472:web:61520f00da42339709d61d",
-    };
+    // Loaded from serverless function to avoid secrets in source code
+    let FIREBASE_CONFIG = null;
+
+    async function loadFirebaseConfig() {
+      try {
+        const res = await fetch("/api/config");
+        if (res.ok) { FIREBASE_CONFIG = await res.json(); return true; }
+      } catch (e) { console.error("Config load error:", e); }
+      return false;
+    }
 
     let firebaseApp = null, firebaseAuth = null, googleProvider = null, firestoreDb = null;
     let firebaseLoaded = false;
@@ -49,6 +51,7 @@
     async function loadFirebase() {
       if (firebaseLoaded) return true;
       try {
+        if (!FIREBASE_CONFIG) { const ok = await loadFirebaseConfig(); if (!ok) return false; }
         const [appMod, authMod, fsMod] = await Promise.all([
           import("https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js"),
           import("https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js"),
