@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Colony Roofers — Large Projects Production</title>
+  <title>Colony Roofers — Large Projects</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23E63946'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='Arial' font-weight='800' font-size='16'>CR</text></svg>" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.9/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script>pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+  <script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -20,28 +20,445 @@
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+    @media print { .no-print { display: none !important; } .page-break { page-break-before: always; } }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect, useCallback, useRef } = React;
+    const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
     // ============================================================
-    // COLONY ROOFERS — LARGE PROJECTS PRODUCTION APP
-    // Single HTML — All 6 Phases: Auth, Dashboard, Docs + AI, Schedule/Gantt, Orders, Daily Logs, Budget + Margin Alerts
+    // COLONY ROOFERS — UNIFIED LARGE PROJECTS APP
+    // Modules: Estimating | Production | Product Catalog
     // ============================================================
 
-    // --- Mock Users (In production: Firestore users collection matched by Google email) ---
+    // ─── FIREBASE CONFIG ───────────────────────────────────────
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCawWMq5X2OpWsmplOYxrR6bhyHeAzXKFw",
+      authDomain: "colony-inspection-app.firebaseapp.com",
+      projectId: "colony-inspection-app",
+      storageBucket: "colony-inspection-app.firebasestorage.app",
+      messagingSenderId: "869437682472",
+      appId: "1:869437682472:web:61520f00da42339709d61d",
+    };
+
+    let firebaseApp = null, firebaseAuth = null, googleProvider = null, firestoreDb = null;
+    let firebaseLoaded = false;
+
+    async function loadFirebase() {
+      if (firebaseLoaded) return true;
+      try {
+        const [appMod, authMod, fsMod] = await Promise.all([
+          import("https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js"),
+          import("https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js"),
+          import("https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js"),
+        ]);
+        firebaseApp = appMod.initializeApp(FIREBASE_CONFIG);
+        firebaseAuth = authMod.getAuth(firebaseApp);
+        googleProvider = new authMod.GoogleAuthProvider();
+        firestoreDb = fsMod.getFirestore(firebaseApp);
+        window._fbAuth = authMod;
+        window._fbFs = fsMod;
+        firebaseLoaded = true;
+        return true;
+      } catch (e) { console.error("Firebase load error:", e); return false; }
+    }
+
+    function useFirebaseAuth() {
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      useEffect(() => {
+        let unsub = null;
+        loadFirebase().then(ok => {
+          if (!ok) { setError("Firebase load failed"); setLoading(false); return; }
+          unsub = window._fbAuth.onAuthStateChanged(firebaseAuth, fb => {
+            setUser(fb ? { name: fb.displayName, email: fb.email, picture: fb.photoURL, uid: fb.uid } : null);
+            setLoading(false);
+          });
+        });
+        return () => { if (unsub) unsub(); };
+      }, []);
+      const signIn = useCallback(async () => {
+        try { setError(null); await window._fbAuth.signInWithPopup(firebaseAuth, googleProvider); }
+        catch (e) { if (e.code !== "auth/popup-closed-by-user") setError("Sign-in failed: " + e.message); }
+      }, []);
+      const signOut = useCallback(async () => { if (firebaseAuth) await window._fbAuth.signOut(firebaseAuth); }, []);
+      return { user, loading, error, signIn, signOut };
+    }
+
+    // ─── ROLE SYSTEM ───────────────────────────────────────────
+    const ROLES = {
+      admin: { label: "Admin", modules: ["estimating", "production", "catalog"], color: "#E63946" },
+      estimator: { label: "Estimator", modules: ["estimating", "catalog"], color: "#3B82F6" },
+      coordinator: { label: "Coordinator", modules: ["production"], color: "#10B981" },
+      superintendent: { label: "Superintendent", modules: ["production"], color: "#F59E0B" },
+    };
+
+    // Map emails to roles — in production this would be Firestore
+    const ROLE_MAP = {
+      "zach@colonyroofers.com": "admin",
+      "zachreececpa@gmail.com": "admin",
+      "brayleigh@colonyroofers.com": "coordinator",
+      "lucio@colonyroofers.com": "superintendent",
+      "derrick@colonyroofers.com": "superintendent",
+      "joseph@colonyroofers.com": "estimator",
+      "jgarside@colonyroofers.com": "estimator",
+    };
+
+    const getUserRole = (email) => ROLE_MAP[email?.toLowerCase()] || "admin"; // default admin for unknown emails during dev
+    const canAccess = (role, module) => ROLES[role]?.modules.includes(module) || false;
+
+    // ─── SHARED CONSTANTS ──────────────────────────────────────
+    const C = {
+      navy: "#1B2A4A", navyLight: "#263B66", navyDark: "#111D35",
+      red: "#E63946", redDark: "#C5303C",
+      white: "#FFFFFF", gray50: "#F8FAFC", gray100: "#F1F5F9", gray200: "#E2E8F0",
+      gray300: "#CBD5E1", gray400: "#94A3B8", gray500: "#64748B", gray600: "#475569", gray700: "#334155",
+      green: "#10B981", greenBg: "#D1FAE5",
+      yellow: "#F59E0B", yellowBg: "#FEF3C7",
+      redBg: "#FEE2E5", blueBg: "#DBEAFE", blue: "#3B82F6",
+    };
+
+    const MARKETS = ["ATL", "TPA", "DFW"];
+    const MARKET_LABELS = { ATL: "Atlanta", TPA: "Tampa", DFW: "Dallas" };
+    const MARKET_INFO = {
+      atlanta: { name: "Colony Roofers - Atlanta", phone: "(678) 515-9795", address: "260 Peachtree St. NW Atlanta, GA 30303", state: "Georgia" },
+      tampa: { name: "Colony Roofers - Tampa", phone: "(813) 551-0707", address: "Tampa, FL", state: "Florida" },
+      dallas: { name: "Colony Roofers - Dallas", phone: "(972) 985-4099", address: "Dallas, TX", state: "Texas" },
+    };
+
+    const generateId = () => Math.random().toString(36).substring(2, 10);
+    const formatCurrency = (val) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
+    const fmt = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+
+    // ─── SHARED SMALL COMPONENTS ───────────────────────────────
+    const Spinner = ({ size = 16, color = C.white }) => (
+      <span style={{ display: "inline-block", width: size, height: size, border: `2px solid ${color}40`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+    );
+
+    const GoogleLogo = () => (
+      <svg width="20" height="20" viewBox="0 0 48 48">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+    );
+
+    // ─── LOGIN SCREEN ──────────────────────────────────────────
+    function LoginScreen({ onSignIn, loading, error }) {
+      const [animIn, setAnimIn] = useState(false);
+      useEffect(() => { setTimeout(() => setAnimIn(true), 100); }, []);
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.navyDark} 0%, ${C.navy} 50%, ${C.navyLight} 100%)` }}>
+          <div style={{ position: "fixed", inset: 0, opacity: 0.03, backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 35px, #fff 35px, #fff 36px)` }} />
+          <div style={{ width: 420, padding: "48px 40px", borderRadius: 16, background: C.white, boxShadow: "0 25px 60px rgba(0,0,0,0.3)", transform: animIn ? "translateY(0)" : "translateY(20px)", opacity: animIn ? 1 : 0, transition: "all 0.6s cubic-bezier(0.16,1,0.3,1)", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: C.red }} />
+            <div style={{ textAlign: "center", marginBottom: 40 }}>
+              <div style={{ width: 72, height: 72, borderRadius: 18, margin: "0 auto 22px", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 8px 24px ${C.navy}40` }}>
+                <span style={{ color: C.white, fontSize: 30, fontWeight: 800 }}>CR</span>
+              </div>
+              <h1 style={{ fontSize: 24, fontWeight: 700, color: C.navy, margin: 0 }}>Colony Roofers</h1>
+              <p style={{ fontSize: 13, color: C.gray500, margin: "6px 0 0", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em" }}>Large Projects Platform</p>
+            </div>
+            <p style={{ fontSize: 14, color: C.gray600, marginBottom: 20, textAlign: "center" }}>Sign in with your Colony Roofers Google account.</p>
+            {loading ? <div style={{ textAlign: "center", padding: 16, color: C.gray400 }}>Loading...</div> : (
+              <button onClick={onSignIn} style={{ width: "100%", padding: "14px 0", border: `1px solid ${C.gray300}`, borderRadius: 10, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", fontSize: 15, fontWeight: 600, color: C.gray700 }}>
+                <GoogleLogo /> Sign in with Google
+              </button>
+            )}
+            {error && <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 8, background: C.redBg, fontSize: 12, color: C.red }}>{error}</div>}
+            <div style={{ marginTop: 28, paddingTop: 20, borderTop: `1px solid ${C.gray100}`, textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: C.gray400 }}>Access restricted to authorized Colony Roofers team members.</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // MODULE: ESTIMATING (Shingle Pricing Tool)
+    // ============================================================
+
+    // --- Estimating Constants ---
+    const DEFAULT_MATERIALS = {
+      shinglePrice: 29.67, hipRidgePrice: 65.0, starterPrice: 42.0,
+      underlaymentPrice: 60.0, iceWaterPrice: 60.0, ridgeVentPrice: 7.0,
+      stepFlashingPrice: 55.0, dripEdgePrice: 6.95, coilNailPrice: 40.0,
+      capNailPrice: 22.0, pipeBootPrice: 4.95, touchPaintPrice: 6.95, np1Price: 8.0,
+    };
+    const DEFAULT_LABOR = { tearOffRate: 75.0, osbLabor: 20.0, osbMaterial: 22.95, osbSheets: 0 };
+    const DEFAULT_EQUIPMENT = { forkliftCost: 7373.0, dumpsterCost: 23120.0, permitCost: 4825.0, includePermit: true, extendedWarranty: false, warrantyPerSq: 11.0 };
+    const DEFAULT_FINANCIALS = { margin: 0.30, taxRate: 0.089 };
+    const EMPTY_BUILDING = { siteplanNum: "", roofrNum: "", phase: 1, pipes: 0, totalArea: 0, pitchedArea: 0, flatArea: 0, predominantPitch: "5/12", eaves: 0, valleys: 0, hips: 0, ridges: 0, rakes: 0, wallFlashing: 0, stepFlashing: 0 };
+
+    const SCOPE_ITEMS = [
+      "Install temporary safety equipment to meet or exceed OSHA and company set safety guidelines.",
+      "Remove existing shingles roofing system and all related accessories down to exposed roof deck.",
+      "Inspect existing roof deck ensuring it is ready for proper installation of the new roof assembly.",
+      "Furnish and install ice and water barrier in a three-foot swath at all valleys and roof penetrations.",
+      "Furnish and install new synthetic underlayment.",
+      "Furnish and install new Architectural Shingles. Color to be determined.",
+      "All roofing details including but not limited to drip edge, roof penetrations, hips and ridges, and off-ridge vents shall meet manufacturer's specifications and installation requirements.",
+      "Dispose of all debris in an appropriate container and remove from jobsite.",
+      "Furnish owner with a Limited Lifetime Manufacturer Warranty.",
+      "Furnish owner with two (2) year workmanship warranty.",
+    ];
+    const UNIT_COSTS = [
+      "At discovery if any fascia is determined to be deteriorated, removal and replacement will be billed at $15 per LF.",
+      "At discovery if any soffit is determined to be deteriorated, removal and replacement will be billed at $15 per LF.",
+      "At discovery if any roof substrate is determined to be deteriorated, removal and replacement will be billed at $95 per 4' x 8' sheet.",
+    ];
+    const EXCLUSIONS = "Carpentry, HVAC, Electrical, Plumbing, Asbestos Abatement, and Framing.";
+
+    // --- Calculation Engine ---
+    function calcWastePercent(bldg) {
+      const sq = bldg.totalArea / 100;
+      if (sq === 0) return 0.15;
+      const raw = ((bldg.hips * 2 + bldg.valleys * 3 + bldg.stepFlashing + bldg.rakes) / sq - 3) * 0.82 + 3;
+      return Math.max(raw, 0) / 100;
+    }
+    function calcBuildingMaterials(bldg, mat, waste) {
+      const a = bldg.totalArea, aw = a * (1 + waste);
+      return {
+        shingleBndl: Math.ceil((aw / 100) * 3), hipRidgeBndl: Math.ceil((bldg.hips + bldg.ridges) / 25),
+        starterBndl: Math.ceil((bldg.rakes + bldg.eaves) / 116), underlaymentRoll: Math.ceil(a / 950),
+        iceWaterRoll: Math.ceil((bldg.valleys + bldg.stepFlashing) / 62), ridgeVentEach: Math.ceil(bldg.ridges / 4),
+        stepFlashingBox: Math.ceil(bldg.stepFlashing / 60), dripEdgeEach: Math.ceil((bldg.eaves + bldg.rakes) / 9.5),
+        coilNailBox: Math.round((aw / 100) * 400 / 7200), capNailBox: Math.round(aw / 2000),
+        pipeBootEach: bldg.pipes, touchPaintEach: bldg.pipes, np1Each: bldg.pipes,
+      };
+    }
+    function calcMaterialCost(q, m) {
+      return q.shingleBndl*m.shinglePrice + q.hipRidgeBndl*m.hipRidgePrice + q.starterBndl*m.starterPrice +
+        q.underlaymentRoll*m.underlaymentPrice + q.iceWaterRoll*m.iceWaterPrice + q.ridgeVentEach*m.ridgeVentPrice +
+        q.stepFlashingBox*m.stepFlashingPrice + q.dripEdgeEach*m.dripEdgePrice + q.coilNailBox*m.coilNailPrice +
+        q.capNailBox*m.capNailPrice + q.pipeBootEach*m.pipeBootPrice + q.touchPaintEach*m.touchPaintPrice + q.np1Each*m.np1Price;
+    }
+    function calcAllBuildings(buildings, materials, labor, equipment, financials) {
+      const n = buildings.length;
+      if (n === 0) return [];
+      const fPer = equipment.forkliftCost/n, dPer = equipment.dumpsterCost/n;
+      const pPer = equipment.includePermit ? equipment.permitCost/n : 0;
+      const osbPer = (labor.osbSheets * (labor.osbMaterial + labor.osbLabor)) / n;
+      return buildings.map(bldg => {
+        const waste = calcWastePercent(bldg);
+        const qtys = calcBuildingMaterials(bldg, materials, waste);
+        const matCost = calcMaterialCost(qtys, materials);
+        const sq = Math.ceil(bldg.totalArea / 100);
+        const labCost = labor.tearOffRate * sq + fPer + dPer + pPer + osbPer;
+        const warCost = equipment.extendedWarranty ? equipment.warrantyPerSq * sq : 0;
+        const totalLabEquip = labCost + warCost;
+        const matTax = matCost * financials.taxRate;
+        const sub = matCost + totalLabEquip + matTax;
+        const margin = sub / (1 - financials.margin) - sub;
+        const total = sub + margin;
+        const sqW = bldg.totalArea * (1 + waste) / 100;
+        return { siteplanNum: bldg.siteplanNum, phase: bldg.phase, waste, qtys, materialCost: matCost, laborCost: totalLabEquip, materialTax: matTax, marginAmt: margin, totalPrice: total, pricePerSq: sqW > 0 ? total / sqW : 0, squaresWithWaste: sqW };
+      });
+    }
+
+    // --- Firestore Helpers ---
+    async function saveSubmission(data) {
+      const id = data.id || "sub_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+      const record = { ...data, id, updatedAt: new Date().toISOString(), createdAt: data.createdAt || new Date().toISOString() };
+      try {
+        const fs = window._fbFs;
+        await fs.setDoc(fs.doc(firestoreDb, "submissions", id), record);
+        return record;
+      } catch (e) { console.error("Save failed:", e); return null; }
+    }
+    async function loadAllSubmissions() {
+      try {
+        const fs = window._fbFs;
+        const snap = await fs.getDocs(fs.query(fs.collection(firestoreDb, "submissions"), fs.orderBy("createdAt", "desc")));
+        const subs = []; snap.forEach(d => subs.push(d.data())); return subs;
+      } catch (e) { console.error("Load failed:", e); return []; }
+    }
+    async function deleteSubmission(id) {
+      try { const fs = window._fbFs; await fs.deleteDoc(fs.doc(firestoreDb, "submissions", id)); return true; }
+      catch (e) { return false; }
+    }
+
+    // --- PLACEHOLDER: Full estimating UI components go here ---
+    // (Step1-Step5, SubmissionsList, ReviewPanel from pricing tool)
+    // These are included in Phase 2 of the build
+
+    function EstimatingModule({ user, role }) {
+      const [mode, setMode] = useState("submissions");
+      const [submissions, setSubmissions] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [selectedSub, setSelectedSub] = useState(null);
+
+      useEffect(() => { loadAllSubmissions().then(s => { setSubmissions(s); setLoading(false); }); }, []);
+
+      const refresh = async () => { setLoading(true); const s = await loadAllSubmissions(); setSubmissions(s); setLoading(false); };
+
+      const counts = {
+        all: submissions.length,
+        pending: submissions.filter(s => s.status === "pending").length,
+        approved: submissions.filter(s => s.status === "approved").length,
+        awarded: submissions.filter(s => s.status === "awarded").length,
+      };
+
+      const [filter, setFilter] = useState("all");
+      const filtered = filter === "all" ? submissions : submissions.filter(s => s.status === filter);
+
+      // Award handler — creates production project
+      const handleAward = async (sub) => {
+        if (!confirm(`Award "${sub.project?.jobName}" and create a production project?`)) return;
+        // Update submission status to awarded
+        const updated = { ...sub, status: "awarded", awardedAt: new Date().toISOString(), awardedBy: user.name };
+        await saveSubmission(updated);
+        // Create production project in localStorage
+        const marketKey = sub.project?.market || "atlanta";
+        const marketCode = marketKey === "atlanta" ? "ATL" : marketKey === "tampa" ? "TPA" : "DFW";
+        const totalPrice = sub.totalPrice || sub.results?.reduce((s, r) => s + r.totalPrice, 0) || 0;
+        const totalMat = sub.results?.reduce((s, r) => s + r.materialCost, 0) || 0;
+        const totalLab = sub.results?.reduce((s, r) => s + r.laborCost, 0) || 0;
+        const estimatedCost = totalMat + totalLab + (sub.results?.reduce((s, r) => s + r.materialTax, 0) || 0);
+        const margin = totalPrice > 0 ? Math.round(((totalPrice - estimatedCost) / totalPrice) * 100) : 0;
+
+        const newProject = {
+          id: generateId(),
+          name: sub.project?.jobName || "Untitled Project",
+          client: sub.project?.companyName || sub.project?.clientName || "",
+          address: (sub.project?.address || "") + " " + (sub.project?.cityStateZip || ""),
+          market: marketCode,
+          status: "Pre-Construction",
+          roofType: "Asphalt Shingles",
+          sqft: sub.buildings?.reduce((s, b) => s + (b.totalArea || 0), 0) || 0,
+          contractValue: totalPrice,
+          estimatedCost: estimatedCost,
+          estimatedMargin: margin,
+          currentCost: 0,
+          currentMargin: margin,
+          assignedSuper: "",
+          buildings: sub.buildings?.length || 1,
+          progress: 0,
+          createdAt: new Date().toISOString().split("T")[0],
+          documents: {},
+          estimateId: sub.id,
+          budgetLineItems: [
+            { id: generateId(), description: "Materials", amount: totalMat, category: "Materials" },
+            { id: generateId(), description: "Labor & Equipment", amount: totalLab, category: "Labor" },
+            { id: generateId(), description: "Material Tax", amount: sub.results?.reduce((s, r) => s + r.materialTax, 0) || 0, category: "Other" },
+          ],
+        };
+        // Save to localStorage
+        try {
+          const existing = JSON.parse(localStorage.getItem("cr_production_projects") || "[]");
+          existing.unshift(newProject);
+          localStorage.setItem("cr_production_projects", JSON.stringify(existing));
+        } catch (e) { console.error("Failed to save project:", e); }
+
+        await refresh();
+        alert(`"${newProject.name}" has been awarded and added to Production! Switch to the Production module to see it.`);
+      };
+
+      return (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.navy }}>Estimates</h2>
+              <p style={{ margin: "4px 0 0", fontSize: 13, color: C.gray500 }}>Shingle replacement pricing — create, review, approve, and award jobs</p>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={refresh} style={{ padding: "8px 16px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.gray600 }}>Refresh</button>
+              <button onClick={() => window.open("https://pricingtoolcr.netlify.app", "_blank")} style={{ padding: "8px 16px", borderRadius: 6, border: "none", background: C.red, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>+ New Estimate</button>
+            </div>
+          </div>
+
+          {/* Filter tabs */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+            {[
+              { key: "all", label: "All" },
+              { key: "pending", label: "Pending" },
+              { key: "approved", label: "Approved" },
+              { key: "awarded", label: "Awarded" },
+            ].map(f => (
+              <button key={f.key} onClick={() => setFilter(f.key)} style={{
+                padding: "6px 14px", borderRadius: 20, border: "none",
+                background: filter === f.key ? C.navy : C.gray100,
+                color: filter === f.key ? C.white : C.gray700,
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}>
+                {f.label} ({counts[f.key] || 0})
+              </button>
+            ))}
+          </div>
+
+          {loading ? (
+            <div style={{ padding: 48, textAlign: "center", color: C.gray400 }}>Loading submissions...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 48, background: C.white, borderRadius: 10, border: `1px solid ${C.gray200}` }}>
+              <div style={{ fontSize: 36, opacity: 0.2, marginBottom: 12 }}>📋</div>
+              <div style={{ color: C.gray500 }}>
+                {submissions.length === 0 ? "No estimates yet. Open the pricing tool to create one." : `No ${filter} estimates found.`}
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {filtered.map(sub => {
+                const statusColors = { pending: { bg: C.yellowBg, color: C.yellow }, approved: { bg: C.greenBg, color: C.green }, rejected: { bg: C.redBg, color: C.red }, awarded: { bg: C.blueBg, color: C.blue } };
+                const sc = statusColors[sub.status] || statusColors.pending;
+                return (
+                  <div key={sub.id} style={{ background: C.white, border: `1px solid ${C.gray200}`, borderRadius: 10, padding: "16px 20px", display: "flex", alignItems: "center", gap: 16 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 700, fontSize: 15, color: C.navy }}>{sub.project?.jobName || "Untitled"}</span>
+                        <span style={{ padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, textTransform: "uppercase", background: sc.bg, color: sc.color }}>{sub.status}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: C.gray500, display: "flex", gap: 16 }}>
+                        <span>{sub.project?.companyName}</span>
+                        <span>{sub.project?.clientName}</span>
+                        <span>{sub.buildings?.length || 0} bldgs</span>
+                        <span>by {sub.submittedBy || "—"}</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", marginRight: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 18, fontFamily: "monospace", color: C.navy }}>{fmt(sub.totalPrice || 0)}</div>
+                      <div style={{ fontSize: 11, color: C.gray400 }}>{new Date(sub.createdAt).toLocaleDateString()}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {sub.status === "approved" && (role === "admin" || role === "estimator") && (
+                        <button onClick={() => handleAward(sub)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: C.green, color: C.white, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>🏆 Award</button>
+                      )}
+                      <button onClick={() => window.open("https://pricingtoolcr.netlify.app", "_blank")} style={{ padding: "6px 14px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Open</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Beam AI Import Section */}
+          <div style={{ marginTop: 32, padding: "24px", borderRadius: 10, border: `2px dashed ${C.gray300}`, textAlign: "center" }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: C.navy, margin: "0 0 8px" }}>Low-Slope Estimates (Beam AI)</h3>
+            <p style={{ fontSize: 13, color: C.gray500, margin: "0 0 16px" }}>Import takeoffs from Beam AI for TPO, single-ply, and modified bitumen projects</p>
+            <button style={{ padding: "10px 24px", borderRadius: 8, border: `1px solid ${C.navy}30`, background: C.navy + "08", color: C.navy, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>📥 Import from Beam AI (Coming Soon)</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // MODULE: PRODUCTION (placeholder — full code in Phase 2)
+    // ============================================================
+
+    // ============================================================
+    // MODULE: PRODUCTION — Full Components
+    // ============================================================
+
+    // --- Production Constants ---
     const USERS = [
       { id: "u1", name: "Zach", email: "zach@colonyroofers.com", role: "admin", initials: "ZC" },
       { id: "u2", name: "Brayleigh Gardner", email: "brayleigh@colonyroofers.com", role: "coordinator", initials: "BG" },
       { id: "u3", name: "Lucio Martinez", email: "lucio@colonyroofers.com", role: "superintendent", initials: "LM" },
       { id: "u4", name: "Derrick Newsome", email: "derrick@colonyroofers.com", role: "superintendent", initials: "DN" },
     ];
-
-    const MARKETS = ["ATL", "TPA", "DFW"];
-    const MARKET_LABELS = { ATL: "Atlanta", TPA: "Tampa", DFW: "Dallas" };
     const STATUSES = ["Pre-Construction", "In Progress", "Delayed", "Complete"];
     const ROOF_TYPES = ["TPO", "Asphalt Shingles", "Single-Ply Membrane", "Modified Bitumen", "Built-Up Roofing"];
 
@@ -69,8 +486,6 @@
         { name: "Other", type: "Other" },
       ],
     };
-
-    const generateId = () => Math.random().toString(36).substring(2, 10);
 
     const INITIAL_PROJECTS = [
       {
@@ -118,8 +533,8 @@
         startDate: "2026-01-05", estCompletion: "2026-02-28", progress: 100,
         buildings: 12, createdAt: "2025-12-20", documents: {}
       },
-    ];
 
+    // --- Production Utilities ---
     // --- Utilities ---
     const getMarginHealth = (estimated, current) => {
       const drop = estimated - current;
@@ -130,17 +545,7 @@
     const formatCurrency = (val) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
     const formatDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-    // --- Colors ---
-    const C = {
-      navy: "#1B2A4A", navyLight: "#263B66", navyDark: "#111D35",
-      red: "#E63946", redDark: "#C5303C",
-      white: "#FFFFFF", gray50: "#F8FAFC", gray100: "#F1F5F9", gray200: "#E2E8F0",
-      gray300: "#CBD5E1", gray400: "#94A3B8", gray500: "#64748B", gray600: "#475569", gray700: "#334155",
-      green: "#10B981", greenBg: "#D1FAE5",
-      yellow: "#F59E0B", yellowBg: "#FEF3C7",
-      redBg: "#FEE2E5", blueBg: "#DBEAFE", blue: "#3B82F6",
-    };
-
+    // --- Icons ---
     // --- Icons ---
     const Ic = ({ d, size = 20 }) => (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{typeof d === "string" ? <path d={d} /> : d}</svg>
@@ -166,24 +571,7 @@
       user: <Ic d={<><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></>} />,
     };
 
-    // --- Google Logo ---
-    const GoogleLogo = () => (
-      <svg width="20" height="20" viewBox="0 0 48 48">
-        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-      </svg>
-    );
-
-    // --- Spinner ---
-    const Spinner = ({ size = 16, color = C.white }) => (
-      <span style={{ display: "inline-block", width: size, height: size, border: `2px solid ${color}40`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-    );
-
-    // ============================================================
-    // SMALL COMPONENTS
-    // ============================================================
+    // --- Production UI Components ---
     function StatusBadge({ status }) {
       const cfg = {
         "Pre-Construction": { bg: C.blueBg, color: C.blue },
@@ -227,65 +615,6 @@
               {sub && <p style={{ fontSize: 12, color: C.gray500, margin: "4px 0 0" }}>{sub}</p>}
             </div>
             <div style={{ color: accent, opacity: 0.5 }}>{icon}</div>
-          </div>
-        </div>
-      );
-    }
-
-    // ============================================================
-    // LOGIN SCREEN
-    // ============================================================
-    function LoginScreen({ onLogin }) {
-      const [animIn, setAnimIn] = useState(false);
-      const [signingIn, setSigningIn] = useState(false);
-      const [showDemo, setShowDemo] = useState(false);
-
-      useEffect(() => { setTimeout(() => setAnimIn(true), 100); }, []);
-
-      const handleGoogleSignIn = (demoUser) => {
-        setSigningIn(true);
-        setTimeout(() => { onLogin(demoUser || USERS[0]); }, 800);
-      };
-
-      return (
-        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.navyDark} 0%, ${C.navy} 50%, ${C.navyLight} 100%)` }}>
-          <div style={{ position: "fixed", inset: 0, opacity: 0.03, backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 35px, #fff 35px, #fff 36px)` }} />
-          <div style={{ width: 420, padding: "48px 40px", borderRadius: 16, background: C.white, boxShadow: "0 25px 60px rgba(0,0,0,0.3)", transform: animIn ? "translateY(0)" : "translateY(20px)", opacity: animIn ? 1 : 0, transition: "all 0.6s cubic-bezier(0.16,1,0.3,1)", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: C.red }} />
-            <div style={{ textAlign: "center", marginBottom: 40 }}>
-              <div style={{ width: 72, height: 72, borderRadius: 18, margin: "0 auto 22px", background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 8px 24px ${C.navy}40` }}>
-                <span style={{ color: C.white, fontSize: 30, fontWeight: 800 }}>CR</span>
-              </div>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: C.navy, margin: 0 }}>Colony Roofers</h1>
-              <p style={{ fontSize: 13, color: C.gray500, margin: "6px 0 0", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em" }}>Large Projects Production</p>
-            </div>
-            <p style={{ fontSize: 14, color: C.gray600, marginBottom: 20, textAlign: "center" }}>Sign in with your Colony Roofers Google account to continue.</p>
-            <button onClick={() => handleGoogleSignIn()} disabled={signingIn} style={{ width: "100%", padding: "14px 0", border: `1px solid ${C.gray300}`, borderRadius: 10, background: C.white, cursor: signingIn ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, transition: "all 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.08)", fontSize: 15, fontWeight: 600, color: C.gray700 }}>
-              {signingIn ? <Spinner size={20} color={C.navy} /> : <GoogleLogo />}
-              {signingIn ? "Signing in..." : "Sign in with Google"}
-            </button>
-            <div style={{ marginTop: 28, paddingTop: 20, borderTop: `1px solid ${C.gray100}`, textAlign: "center" }}>
-              <p style={{ fontSize: 11, color: C.gray400, margin: 0 }}>Access is restricted to authorized Colony Roofers team members.</p>
-            </div>
-            {/* Demo role switcher */}
-            <div style={{ marginTop: 20, borderTop: `1px dashed ${C.gray200}`, paddingTop: 14 }}>
-              <button onClick={() => setShowDemo(!showDemo)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: C.gray400, width: "100%", textAlign: "center" }}>
-                Demo mode: Test different roles {showDemo ? "▲" : "▼"}
-              </button>
-              {showDemo && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-                  {USERS.map(u => (
-                    <button key={u.id} onClick={() => handleGoogleSignIn(u)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", border: `1px solid ${C.gray200}`, borderRadius: 8, background: C.gray50, cursor: "pointer", textAlign: "left", width: "100%" }}>
-                      <div style={{ width: 30, height: 30, borderRadius: 7, background: `linear-gradient(135deg, ${C.navy}, ${C.navyLight})`, display: "flex", alignItems: "center", justifyContent: "center", color: C.white, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{u.initials}</div>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>{u.name}</div>
-                        <div style={{ fontSize: 10, color: C.gray500, textTransform: "capitalize" }}>{u.role === "coordinator" ? "Production Coordinator" : u.role}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         </div>
       );
@@ -2373,7 +2702,8 @@ Extract every identifiable expense. Use the most specific category possible. If 
 
     // ============================================================
     // PROJECT DETAIL PANEL (Tabbed)
-    // ============================================================
+
+    // --- ProjectDetail & ProjectCard ---
     function ProjectDetail({ project, onClose, supers, onUpdateProject, user }) {
       const superName = supers.find(s => s.id === project.assignedSuper)?.name || "Unassigned";
       const marginHealth = getMarginHealth(project.estimatedMargin, project.currentMargin);
@@ -2502,7 +2832,8 @@ Extract every identifiable expense. Use the most specific category possible. If 
     // MAIN DASHBOARD
     // ============================================================
 
-    // Persistence helpers — strip large base64 doc data before saving
+
+    // --- Persistence ---
     const STORAGE_KEY = "cr_production_projects";
     const USERS_STORAGE_KEY = "cr_production_users";
     const stripDocsForStorage = (projects) => projects.map(p => {
@@ -2532,7 +2863,17 @@ Extract every identifiable expense. Use the most specific category possible. If 
       try { localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users)); } catch(e) {}
     };
 
-    function Dashboard({ user, onLogout }) {
+
+    // --- Production Module (Dashboard) ---
+    function ProductionModule({ user: appUser, role }) {
+      const PROD_USERS = [
+        { id: "u1", name: "Zach", email: "zach@colonyroofers.com", role: "admin", initials: "ZC" },
+        { id: "u1b", name: "Zach", email: "zachreececpa@gmail.com", role: "admin", initials: "ZC" },
+        { id: "u2", name: "Brayleigh Gardner", email: "brayleigh@colonyroofers.com", role: "coordinator", initials: "BG" },
+        { id: "u3", name: "Lucio Martinez", email: "lucio@colonyroofers.com", role: "superintendent", initials: "LM" },
+        { id: "u4", name: "Derrick Newsome", email: "derrick@colonyroofers.com", role: "superintendent", initials: "DN" },
+      ];
+      const user = PROD_USERS.find(u => u.email === appUser?.email) || { id: "u1", name: appUser?.name || "User", email: appUser?.email, role: role, initials: (appUser?.name || "U")[0] };
       const [projects, setProjects] = useState(loadProjects);
       const [marketFilter, setMarketFilter] = useState("All");
       const [statusFilter, setStatusFilter] = useState("All");
@@ -2570,28 +2911,7 @@ Extract every identifiable expense. Use the most specific category possible. If 
       const isAdmin = user.role === "admin" || user.role === "coordinator";
 
       return (
-        <div style={{ minHeight: "100vh", background: C.gray50 }}>
-          {/* Nav */}
-          <nav style={{ background: C.navy, padding: "0 32px", height: 60, display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: `0 2px 12px ${C.navyDark}40` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.red}, ${C.redDark})` }}><span style={{ color: C.white, fontSize: 14, fontWeight: 800 }}>CR</span></div>
-              <div><span style={{ color: C.white, fontSize: 15, fontWeight: 700 }}>Colony Roofers</span><span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginLeft: 10, fontWeight: 500 }}>Large Projects</span></div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {isAdmin && (
-                <button onClick={() => setShowUserMgmt(true)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.15)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}>
-                  {I.user} Users
-                </button>
-              )}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "rgba(255,255,255,0.08)", borderRadius: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${C.red}, ${C.redDark})`, display: "flex", alignItems: "center", justifyContent: "center", color: C.white, fontSize: 11, fontWeight: 700 }}>{user.initials}</div>
-                <div><div style={{ fontSize: 12, fontWeight: 600, color: C.white }}>{user.name}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textTransform: "capitalize" }}>{user.role}</div></div>
-              </div>
-              <button onClick={onLogout} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)", padding: 4, borderRadius: 4 }} title="Sign Out">{I.logout}</button>
-            </div>
-          </nav>
+        <div style={{ background: C.gray50, minHeight: "calc(100vh - 56px)" }}>
 
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 32px" }}>
             {/* Header */}
@@ -2717,1902 +3037,213 @@ Extract every identifiable expense. Use the most specific category possible. If 
           )}
         </div>
       );
-    }<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Colony Roofers — Shingle Replacement Pricing Tool</title>
-  <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🏠</text></svg>" />
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body, #root { min-height: 100vh; }
-    body { font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif; }
-    input:focus, select:focus, textarea:focus { outline: 2px solid #1a2744; outline-offset: -1px; }
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    @media print {
-      .no-print { display: none !important; }
-      .page-break { page-break-before: always; }
     }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-
-  <script type="text/babel" data-type="module">
-const { useState, useMemo, useRef, useEffect, useCallback } = React;
-
-// ─── FIREBASE CONFIG ───────────────────────────────────────────────
-// Replace with your Firebase project config from Firebase Console → Project Settings
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCawWMq5X2OpWsmplOYxrR6bhyHeAzXKFw",
-  authDomain: "colony-inspection-app.firebaseapp.com",
-  projectId: "colony-inspection-app",
-  storageBucket: "colony-inspection-app.firebasestorage.app",
-  messagingSenderId: "869437682472",
-  appId: "1:869437682472:web:61520f00da42339709d61d",
-  measurementId: "G-EHR286MB33",
-};
-
-const isConfigured = !FIREBASE_CONFIG.apiKey.includes("YOUR_");
-
-// ─── FIREBASE LOADER & AUTH ────────────────────────────────────────
-let firebaseApp = null;
-let firebaseAuth = null;
-let googleProvider = null;
-let firebaseLoaded = false;
-
-let firestoreDb = null;
-
-async function loadFirebase() {
-  if (firebaseLoaded) return true;
-  try {
-    const [appModule, authModule, fsModule] = await Promise.all([
-      import("https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js"),
-      import("https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js"),
-      import("https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js"),
-    ]);
-    firebaseApp = appModule.initializeApp(FIREBASE_CONFIG);
-    firebaseAuth = authModule.getAuth(firebaseApp);
-    googleProvider = new authModule.GoogleAuthProvider();
-    firestoreDb = fsModule.getFirestore(firebaseApp);
-    window._fbAuth = authModule;
-    window._fbFs = fsModule;
-    firebaseLoaded = true;
-    return true;
-  } catch (e) {
-    console.error("Firebase load error:", e);
-    return false;
-  }
-}
-
-function useFirebaseAuth() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (!isConfigured) {
-      setLoading(false);
-      return;
-    }
-    let unsubscribe = null;
-    loadFirebase().then((ok) => {
-      if (!ok) {
-        setError("Failed to load Firebase");
-        setLoading(false);
-        return;
-      }
-      unsubscribe = window._fbAuth.onAuthStateChanged(firebaseAuth, (fbUser) => {
-        if (fbUser) {
-          setUser({
-            name: fbUser.displayName,
-            email: fbUser.email,
-            picture: fbUser.photoURL,
-            uid: fbUser.uid,
-          });
-        } else {
-          setUser(null);
-        }
-        setLoading(false);
-      });
-    });
-    return () => { if (unsubscribe) unsubscribe(); };
-  }, []);
-
-  const signIn = useCallback(async () => {
-    if (!firebaseAuth || !googleProvider) {
-      setError("Firebase not initialized");
-      return;
-    }
-    try {
-      setError(null);
-      await window._fbAuth.signInWithPopup(firebaseAuth, googleProvider);
-    } catch (e) {
-      if (e.code !== "auth/popup-closed-by-user") {
-        setError("Sign-in failed: " + (e.message || e.code));
-      }
-    }
-  }, []);
-
-  const signOut = useCallback(async () => {
-    if (!firebaseAuth) return;
-    try {
-      await window._fbAuth.signOut(firebaseAuth);
-    } catch (e) {
-      console.error("Sign-out error:", e);
-    }
-  }, []);
-
-  return { user, loading, error, signIn, signOut };
-}
-
-// ─── LOGIN SCREEN ──────────────────────────────────────────────────
-function LoginScreen({ onSignIn, loading, error }) {
-  return (
-    <div style={{
-      minHeight: "100vh", display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      background: "linear-gradient(135deg, #1a2744 0%, #2a3d66 100%)",
-      fontFamily: "'Segoe UI', 'Inter', system-ui, sans-serif",
-    }}>
-      <div style={{
-        background: "#ffffff", borderRadius: 16, padding: "48px 40px",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-        textAlign: "center", maxWidth: 420, width: "90%",
-      }}>
-        <div style={{ marginBottom: 32 }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "#1a2744", letterSpacing: 1.5, marginBottom: 4 }}>
-            COLONY ROOFERS
-          </div>
-          <div style={{ fontSize: 12, color: "#9ca3af", letterSpacing: 0.5, textTransform: "uppercase" }}>
-            Shingle Replacement Pricing Tool
-          </div>
-        </div>
-
-        <div style={{
-          width: 64, height: 64, borderRadius: 32,
-          background: "#f3f4f6", margin: "0 auto 24px",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 28,
-        }}>
-          🔒
-        </div>
-
-        <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 28, lineHeight: 1.5 }}>
-          Sign in with your Colony Roofers Google account to access the pricing tool.
-        </p>
-
-        {loading ? (
-          <div style={{ color: "#9ca3af", fontSize: 14, padding: 16 }}>Loading...</div>
-        ) : !isConfigured ? (
-          <div style={{
-            padding: "14px 16px", borderRadius: 8,
-            background: "#fef3c7", border: "1px solid #fde68a",
-            fontSize: 12, color: "#92400e", textAlign: "left", lineHeight: 1.6,
-          }}>
-            <strong>Setup Required:</strong> Replace the <code>FIREBASE_CONFIG</code> object at the top of the code with your Firebase project credentials from the Firebase Console.
-          </div>
-        ) : (
-          <button
-            onClick={onSignIn}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              width: 280, margin: "0 auto", padding: "12px 20px",
-              background: "#ffffff", border: "1px solid #dadce0", borderRadius: 8,
-              fontSize: 14, fontWeight: 500, color: "#3c4043",
-              cursor: "pointer", fontFamily: "'Segoe UI', system-ui, sans-serif",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-              transition: "box-shadow 0.2s",
-            }}
-            onMouseOver={(e) => e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"}
-            onMouseOut={(e) => e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.08)"}
-          >
-            <svg width="18" height="18" viewBox="0 0 48 48">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-            </svg>
-            Sign in with Google
-          </button>
-        )}
-
-        {error && (
-          <div style={{
-            marginTop: 16, padding: "10px 14px", borderRadius: 8,
-            background: "#fef2f2", border: "1px solid #fecaca",
-            fontSize: 12, color: "#991b1b",
-          }}>
-            {error}
-          </div>
-        )}
-      </div>
-
-      <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginTop: 24 }}>
-        Colony Roofers LLC — Internal Tool
-      </div>
-    </div>
-  );
-}
-
-// ─── CONSTANTS ─────────────────────────────────────────────────────
-const BRAND = {
-  navy: "#1a2744",
-  navyLight: "#2a3d66",
-  red: "#e02b2b",
-  redHover: "#c42222",
-  cream: "#f8f6f1",
-  white: "#ffffff",
-  gray100: "#f3f4f6",
-  gray200: "#e5e7eb",
-  gray300: "#d1d5db",
-  gray400: "#9ca3af",
-  gray500: "#6b7280",
-  gray700: "#374151",
-  gray900: "#111827",
-};
-
-const DEFAULT_MATERIALS = {
-  shinglePrice: 29.67,
-  shingleUnit: "BNDL",
-  hipRidgePrice: 65.0,
-  hipRidgeUnit: "BNDL",
-  starterPrice: 42.0,
-  starterUnit: "BNDL",
-  underlaymentPrice: 60.0,
-  underlaymentUnit: "ROLL",
-  iceWaterPrice: 60.0,
-  iceWaterUnit: "ROLL",
-  ridgeVentPrice: 7.0,
-  ridgeVentUnit: "EACH",
-  stepFlashingPrice: 55.0,
-  stepFlashingUnit: "BOX",
-  dripEdgePrice: 6.95,
-  dripEdgeUnit: "EACH",
-  coilNailPrice: 40.0,
-  coilNailUnit: "BOX",
-  capNailPrice: 22.0,
-  capNailUnit: "BOX",
-  pipeBootPrice: 4.95,
-  pipeBootUnit: "EACH",
-  touchPaintPrice: 6.95,
-  touchPaintUnit: "EACH",
-  np1Price: 8.0,
-  np1Unit: "EACH",
-};
-
-const DEFAULT_LABOR = {
-  tearOffRate: 75.0,
-  osbLabor: 20.0,
-  osbMaterial: 22.95,
-  osbSheets: 0,
-};
-
-const DEFAULT_EQUIPMENT = {
-  forkliftCost: 7373.0,
-  dumpsterCost: 23120.0,
-  permitCost: 4825.0,
-  includePermit: true,
-  extendedWarranty: false,
-  warrantyPerSq: 11.0,
-};
-
-const DEFAULT_FINANCIALS = {
-  margin: 0.30,
-  taxRate: 0.089,
-};
-
-const EMPTY_BUILDING = {
-  siteplanNum: "",
-  roofrNum: "",
-  phase: 1,
-  pipes: 0,
-  totalArea: 0,
-  pitchedArea: 0,
-  flatArea: 0,
-  predominantPitch: "5/12",
-  eaves: 0,
-  valleys: 0,
-  hips: 0,
-  ridges: 0,
-  rakes: 0,
-  wallFlashing: 0,
-  stepFlashing: 0,
-};
-
-const SCOPE_ITEMS = [
-  "Install temporary safety equipment to meet or exceed OSHA and company set safety guidelines.",
-  "Remove existing shingles roofing system and all related accessories down to exposed roof deck.",
-  "Inspect existing roof deck ensuring it is ready for proper installation of the new roof assembly.",
-  "Furnish and install ice and water barrier in a three-foot swath at all valleys and roof penetrations.",
-  "Furnish and install new synthetic underlayment.",
-  "Furnish and install new Architectural Shingles. Color to be determined.",
-  "All roofing details including but not limited to drip edge, roof penetrations, hips and ridges, and off-ridge vents shall meet manufacturer's specifications and installation requirements.",
-  "Dispose of all debris in an appropriate container and remove from jobsite.",
-  "Furnish owner with a Limited Lifetime Manufacturer Warranty.",
-  "Furnish owner with two (2) year workmanship warranty.",
-];
-
-const UNIT_COSTS = [
-  "At discovery if any fascia is determined to be deteriorated, removal and replacement will be billed at $15 per LF.",
-  "At discovery if any soffit is determined to be deteriorated, removal and replacement will be billed at $15 per LF.",
-  "At discovery if any roof substrate is determined to be deteriorated, removal and replacement will be billed at $95 per 4' x 8' sheet.",
-];
-
-const EXCLUSIONS =
-  "Carpentry, HVAC, Electrical, Plumbing, Asbestos Abatement, and Framing.";
-
-const MARKETS = {
-  atlanta: { name: "Colony Roofers - Atlanta", phone: "(678) 515-9795", address: "260 Peachtree St. NW Atlanta, GA 30303", state: "Georgia" },
-  tampa: { name: "Colony Roofers - Tampa", phone: "(813) 551-0707", address: "Tampa, FL", state: "Florida" },
-  dallas: { name: "Colony Roofers - Dallas", phone: "(972) 985-4099", address: "Dallas, TX", state: "Texas" },
-};
-
-// ─── CALCULATION ENGINE ────────────────────────────────────────────
-function calcWastePercent(bldg) {
-  const squares = bldg.totalArea / 100;
-  if (squares === 0) return 0.15;
-  const raw = ((bldg.hips * 2 + bldg.valleys * 3 + bldg.stepFlashing + bldg.rakes) / squares - 3) * 0.82 + 3;
-  return Math.max(raw, 0) / 100;
-}
-
-function calcBuildingMaterials(bldg, materials, waste) {
-  const area = bldg.totalArea;
-  const areaWithWaste = area * (1 + waste);
-  return {
-    shingleBndl: Math.ceil((areaWithWaste / 100) * 3),
-    hipRidgeBndl: Math.ceil((bldg.hips + bldg.ridges) / 25),
-    starterBndl: Math.ceil((bldg.rakes + bldg.eaves) / 116),
-    underlaymentRoll: Math.ceil(area / 950),
-    iceWaterRoll: Math.ceil((bldg.valleys + bldg.stepFlashing) / 62),
-    ridgeVentEach: Math.ceil(bldg.ridges / 4),
-    stepFlashingBox: Math.ceil(bldg.stepFlashing / 60),
-    dripEdgeEach: Math.ceil((bldg.eaves + bldg.rakes) / 9.5),
-    coilNailBox: Math.round((areaWithWaste / 100) * 400 / 7200),
-    capNailBox: Math.round(areaWithWaste / 2000),
-    pipeBootEach: bldg.pipes,
-    touchPaintEach: bldg.pipes,
-    np1Each: bldg.pipes,
-  };
-}
-
-function calcMaterialCost(qtys, materials) {
-  return (
-    qtys.shingleBndl * materials.shinglePrice +
-    qtys.hipRidgeBndl * materials.hipRidgePrice +
-    qtys.starterBndl * materials.starterPrice +
-    qtys.underlaymentRoll * materials.underlaymentPrice +
-    qtys.iceWaterRoll * materials.iceWaterPrice +
-    qtys.ridgeVentEach * materials.ridgeVentPrice +
-    qtys.stepFlashingBox * materials.stepFlashingPrice +
-    qtys.dripEdgeEach * materials.dripEdgePrice +
-    qtys.coilNailBox * materials.coilNailPrice +
-    qtys.capNailBox * materials.capNailPrice +
-    qtys.pipeBootEach * materials.pipeBootPrice +
-    qtys.touchPaintEach * materials.touchPaintPrice +
-    qtys.np1Each * materials.np1Price
-  );
-}
-
-function calcAllBuildings(buildings, materials, labor, equipment, financials) {
-  const numBuildings = buildings.length;
-  if (numBuildings === 0) return [];
-
-  const forkliftPer = equipment.forkliftCost / numBuildings;
-  const dumpsterPer = equipment.dumpsterCost / numBuildings;
-  const permitPer = equipment.includePermit ? equipment.permitCost / numBuildings : 0;
-  const osbTotal = labor.osbSheets * (labor.osbMaterial + labor.osbLabor);
-  const osbPer = osbTotal / numBuildings;
-
-  return buildings.map((bldg) => {
-    const waste = calcWastePercent(bldg);
-    const qtys = calcBuildingMaterials(bldg, materials, waste);
-    const materialCost = calcMaterialCost(qtys, materials);
-    const squares = Math.ceil(bldg.totalArea / 100);
-    const tearOff = labor.tearOffRate * squares;
-    const laborCost = tearOff + forkliftPer + dumpsterPer + permitPer + osbPer;
-    const warrantyCost = equipment.extendedWarranty ? equipment.warrantyPerSq * squares : 0;
-    const totalLaborEquip = laborCost + warrantyCost;
-    const materialTax = materialCost * financials.taxRate;
-    const subtotal = materialCost + totalLaborEquip + materialTax;
-    const marginAmt = subtotal / (1 - financials.margin) - subtotal;
-    const totalPrice = subtotal + marginAmt;
-    const squaresWithWaste = bldg.totalArea * (1 + waste) / 100;
-    const pricePerSq = squaresWithWaste > 0 ? totalPrice / squaresWithWaste : 0;
-
-    return {
-      siteplanNum: bldg.siteplanNum,
-      phase: bldg.phase,
-      waste,
-      qtys,
-      materialCost,
-      laborCost: totalLaborEquip,
-      materialTax,
-      marginAmt,
-      totalPrice,
-      pricePerSq,
-      squaresWithWaste,
-    };
-  });
-}
-
-// ─── HELPERS ───────────────────────────────────────────────────────
-const fmt = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-const fmtNum = (n, d = 2) => Number(n).toFixed(d);
-const pct = (n) => (n * 100).toFixed(1) + "%";
-
-// ─── COMPONENTS ────────────────────────────────────────────────────
-
-// Step indicator
-function StepNav({ steps, current, setCurrent, canAdvance }) {
-  return (
-    <div style={{ display: "flex", gap: 0, borderBottom: `3px solid ${BRAND.navy}`, marginBottom: 32 }}>
-      {steps.map((s, i) => (
-        <button
-          key={i}
-          onClick={() => i <= canAdvance ? setCurrent(i) : null}
-          style={{
-            flex: 1,
-            padding: "14px 8px",
-            background: i === current ? BRAND.navy : i <= canAdvance ? BRAND.gray100 : BRAND.gray200,
-            color: i === current ? BRAND.white : i <= canAdvance ? BRAND.navy : BRAND.gray400,
-            border: "none",
-            borderRight: i < steps.length - 1 ? `1px solid ${BRAND.gray300}` : "none",
-            cursor: i <= canAdvance ? "pointer" : "default",
-            fontWeight: i === current ? 700 : 500,
-            fontSize: 13,
-            letterSpacing: 0.3,
-            fontFamily: "'Segoe UI', system-ui, sans-serif",
-            transition: "all 0.2s",
-          }}
-        >
-          <span style={{ opacity: 0.6, marginRight: 6 }}>{i + 1}.</span>
-          {s}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// Reusable input field
-function Field({ label, value, onChange, type = "text", prefix, suffix, width, small, disabled, placeholder }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, width: width || "auto", flex: width ? "none" : 1 }}>
-      {label && (
-        <label style={{ fontSize: small ? 11 : 12, fontWeight: 600, color: BRAND.gray500, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          {label}
-        </label>
-      )}
-      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-        {prefix && (
-          <span style={{ padding: "8px 10px", background: BRAND.gray100, border: `1px solid ${BRAND.gray300}`, borderRight: "none", borderRadius: "6px 0 0 6px", fontSize: 14, color: BRAND.gray500 }}>
-            {prefix}
-          </span>
-        )}
-        <input
-          type={type}
-          value={value}
-          onChange={onChange}
-          disabled={disabled}
-          placeholder={placeholder}
-          style={{
-            padding: small ? "6px 8px" : "8px 12px",
-            border: `1px solid ${BRAND.gray300}`,
-            borderRadius: prefix ? "0 6px 6px 0" : suffix ? "6px 0 0 6px" : 6,
-            fontSize: small ? 13 : 14,
-            width: "100%",
-            outline: "none",
-            background: disabled ? BRAND.gray100 : BRAND.white,
-            color: BRAND.gray900,
-            fontFamily: "inherit",
-          }}
-        />
-        {suffix && (
-          <span style={{ padding: "8px 10px", background: BRAND.gray100, border: `1px solid ${BRAND.gray300}`, borderLeft: "none", borderRadius: "0 6px 6px 0", fontSize: 12, color: BRAND.gray500, whiteSpace: "nowrap" }}>
-            {suffix}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SectionTitle({ children, sub }) {
-  return (
-    <div style={{ marginBottom: 16, marginTop: 8 }}>
-      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: BRAND.navy, letterSpacing: 0.3 }}>{children}</h3>
-      {sub && <p style={{ margin: "4px 0 0", fontSize: 13, color: BRAND.gray500 }}>{sub}</p>}
-    </div>
-  );
-}
-
-function Card({ children, style }) {
-  return (
-    <div style={{ background: BRAND.white, border: `1px solid ${BRAND.gray200}`, borderRadius: 10, padding: 24, marginBottom: 16, ...style }}>
-      {children}
-    </div>
-  );
-}
-
-function Btn({ children, onClick, primary, danger, small, disabled, style: s }) {
-  const bg = danger ? "#dc2626" : primary ? BRAND.red : BRAND.gray100;
-  const fg = danger || primary ? BRAND.white : BRAND.gray700;
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        padding: small ? "6px 14px" : "10px 24px",
-        background: disabled ? BRAND.gray300 : bg,
-        color: disabled ? BRAND.gray500 : fg,
-        border: danger || primary ? "none" : `1px solid ${BRAND.gray300}`,
-        borderRadius: 6,
-        fontSize: small ? 12 : 14,
-        fontWeight: 600,
-        cursor: disabled ? "default" : "pointer",
-        fontFamily: "inherit",
-        transition: "all 0.15s",
-        ...s,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-// ─── STEP 1: PROJECT INFO ──────────────────────────────────────────
-function Step1({ project, setProject }) {
-  const up = (k) => (e) => setProject((p) => ({ ...p, [k]: e.target.value }));
-  return (
-    <div>
-      <SectionTitle sub="Job and client details that appear on the proposal">Project Information</SectionTitle>
-      <Card>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <Field label="Job / Property Name" value={project.jobName} onChange={up("jobName")} placeholder="Brandon Mill Farms" />
-          <Field label="Date of Estimate" value={project.date} onChange={up("date")} type="date" />
-          <Field label="Client Name" value={project.clientName} onChange={up("clientName")} placeholder="Christy Barber" />
-          <Field label="Client Email" value={project.clientEmail} onChange={up("clientEmail")} placeholder="client@company.com" />
-          <Field label="Property Address" value={project.address} onChange={up("address")} placeholder="7580 Colquitt Road" />
-          <Field label="City, State, Zip" value={project.cityStateZip} onChange={up("cityStateZip")} placeholder="Atlanta, GA 30360" />
-          <Field label="Company Name" value={project.companyName} onChange={up("companyName")} placeholder="Homeside Properties" />
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: BRAND.gray500, textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 4 }}>Market</label>
-            <select
-              value={project.market}
-              onChange={up("market")}
-              style={{ padding: "8px 12px", border: `1px solid ${BRAND.gray300}`, borderRadius: 6, fontSize: 14, width: "100%", background: BRAND.white, fontFamily: "inherit" }}
-            >
-              <option value="atlanta">Atlanta</option>
-              <option value="tampa">Tampa</option>
-              <option value="dallas">Dallas</option>
-            </select>
-          </div>
-        </div>
-      </Card>
-      <SectionTitle sub="Colony Roofers representative on the proposal">Rep Information</SectionTitle>
-      <Card>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <Field label="Rep Name" value={project.repName} onChange={up("repName")} placeholder="Jennifer Gragg" />
-          <Field label="Rep Email" value={project.repEmail} onChange={up("repEmail")} placeholder="jgragg@colonyroofers.com" />
-          <Field label="Rep Phone" value={project.repPhone} onChange={up("repPhone")} placeholder="(678) 515-9795" />
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-// ─── STEP 2: BUILDING MEASUREMENTS (Roofr PDF Import) ─────────────
-function Step2({ buildings, setBuildings }) {
-  const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null); // {type: 'success'|'error', msg: string}
-  const [fileName, setFileName] = useState(null);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const addBuilding = () => {
-    setBuildings((b) => [...b, { ...EMPTY_BUILDING, siteplanNum: String(b.length + 1), roofrNum: String(b.length + 1) }]);
-  };
-  const removeBuilding = (i) => setBuildings((b) => b.filter((_, j) => j !== i));
-  const upField = (i, k) => (e) => {
-    const val = e.target.value;
-    setBuildings((b) => b.map((bldg, j) => (j === i ? { ...bldg, [k]: k === "siteplanNum" || k === "roofrNum" || k === "predominantPitch" ? val : Number(val) || 0 } : bldg)));
-  };
-
-  const extractFromPdf = async (file) => {
-    setUploading(true);
-    setUploadStatus(null);
-    setFileName(file.name);
-    let debugInfo = "";
-
-    try {
-      // Step 1: Load pdf.js from CDN
-      debugInfo = "Step 1: Loading pdf.js...";
-      if (!window.pdfjsLib) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-          script.onload = () => {
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-            resolve();
-          };
-          script.onerror = () => reject(new Error("Failed to load pdf.js"));
-          document.head.appendChild(script);
-        });
-      }
-      debugInfo = "Step 1 done. pdf.js loaded.";
-
-      // Step 2: Read PDF file as ArrayBuffer
-      debugInfo += "\nStep 2: Reading PDF...";
-      const arrayBuffer = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = () => res(reader.result);
-        reader.onerror = () => rej(new Error("Failed to read file"));
-        reader.readAsArrayBuffer(file);
-      });
-      debugInfo += ` Size: ${arrayBuffer.byteLength} bytes`;
-
-      // Step 3: Extract text from all pages
-      debugInfo += "\nStep 3: Extracting text...";
-      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const numPages = pdf.numPages;
-      debugInfo += ` Pages: ${numPages}`;
-
-      let fullText = "";
-      for (let i = 1; i <= numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item) => item.str).join(" ");
-        fullText += `\n--- PAGE ${i} ---\n${pageText}`;
-      }
-      debugInfo += `\nExtracted ${fullText.length} chars of text`;
-      debugInfo += `\nFirst 300 chars: ${fullText.slice(0, 300)}`;
-
-      if (fullText.trim().length < 50) {
-        throw new Error("Could not extract enough text from PDF. The file may be image-only.");
-      }
-
-      // Step 4: Parse Roofr text into building data (client-side, no API)
-      debugInfo += "\nStep 4: Parsing Roofr format...";
-
-      // Helper: parse "472ft 3in" format to decimal feet
-      const parseFtIn = (text, label) => {
-        // Match patterns like "Total eaves 472ft 3in" or "Total eaves\n\n472ft 3in"
-        const patterns = [
-          new RegExp("Total\\s+" + label + "\\s*[:\\s]*(\\d+)ft\\s*(\\d+)in", "i"),
-          new RegExp(label + "\\s*[:\\s]*(\\d+)ft\\s*(\\d+)in", "i"),
-        ];
-        for (const re of patterns) {
-          const m = text.match(re);
-          if (m) {
-            return parseInt(m[1]) + parseInt(m[2]) / 12;
-          }
-        }
-        return 0;
-      };
-
-      // Helper: parse "10329 sqft" format
-      const parseSqft = (text, label) => {
-        const patterns = [
-          new RegExp("Total\\s+" + label + "\\s*[:\\s]*([\\d,]+)\\s*sqft", "i"),
-          new RegExp(label + "\\s*[:\\s]*([\\d,]+)\\s*sqft", "i"),
-        ];
-        for (const re of patterns) {
-          const m = text.match(re);
-          if (m) return parseFloat(m[1].replace(/,/g, ""));
-        }
-        return 0;
-      };
-
-      // Helper: find pitch like "5/12"
-      const findPitch = (text) => {
-        const m = text.match(/Predominant\s+pitch\s*(\d+\/12)/i);
-        if (m) return m[1];
-        const m2 = text.match(/(\d+\/12)/);
-        return m2 ? m2[1] : "5/12";
-      };
-
-      // Split text into per-building sections using "report #X" markers
-      const reportPattern = /(?:Summary of all structures from |report\s*#)(\d+)/gi;
-      const reportMatches = [];
-      let rm;
-      while ((rm = reportPattern.exec(fullText)) !== null) {
-        reportMatches.push({ num: parseInt(rm[1]), index: rm.index });
-      }
-
-      // Deduplicate by building number, keep first occurrence
-      const seenNums = new Set();
-      const uniqueReports = reportMatches.filter(r => {
-        if (seenNums.has(r.num)) return false;
-        seenNums.add(r.num);
-        return true;
-      });
-
-      uniqueReports.sort((a, b) => a.num - b.num);
-      debugInfo += `\nFound ${uniqueReports.length} building report sections`;
-
-      // Extract section text for each building
-      const buildingSections = uniqueReports.map((r, i) => {
-        const start = r.index;
-        const end = i + 1 < uniqueReports.length
-          ? uniqueReports[i + 1].index
-          : fullText.length;
-        return { num: r.num, text: fullText.slice(start, end) };
-      });
-
-      let newBuildings = [];
-
-      if (buildingSections.length > 0) {
-        newBuildings = buildingSections.map((section) => {
-          const t = section.text;
-          const bldg = {
-            siteplanNum: String(section.num),
-            roofrNum: String(section.num),
-            phase: 1,
-            pipes: 0,
-            totalArea: parseSqft(t, "roof\\s*area"),
-            pitchedArea: parseSqft(t, "pitched\\s*area"),
-            flatArea: parseSqft(t, "flat\\s*area"),
-            predominantPitch: findPitch(t),
-            eaves: parseFloat(parseFtIn(t, "eaves").toFixed(2)),
-            valleys: parseFloat(parseFtIn(t, "valleys").toFixed(2)),
-            hips: parseFloat(parseFtIn(t, "hips").toFixed(2)),
-            ridges: parseFloat(parseFtIn(t, "ridges").toFixed(2)),
-            rakes: parseFloat(parseFtIn(t, "rakes").toFixed(2)),
-            wallFlashing: parseFloat(parseFtIn(t, "wall\\s*flashing").toFixed(2)),
-            stepFlashing: parseFloat(parseFtIn(t, "step\\s*flashing").toFixed(2)),
-          };
-          return bldg;
-        });
-
-        // Filter out entries with zero area (might be duplicates from summary page)
-        const validBuildings = newBuildings.filter(b => b.totalArea > 0);
-        if (validBuildings.length > 0) {
-          newBuildings = validBuildings;
-        }
-      }
-
-      debugInfo += `\nFinal: ${newBuildings.length} buildings parsed`;
-
-      if (newBuildings.length > 0) {
-        const b1 = newBuildings[0];
-        debugInfo += `\nBldg 1: area=${b1.totalArea}, eaves=${b1.eaves}, valleys=${b1.valleys}, hips=${b1.hips}, ridges=${b1.ridges}, rakes=${b1.rakes}, wall=${b1.wallFlashing}, step=${b1.stepFlashing}, pitch=${b1.predominantPitch}`;
-      }
-
-      if (newBuildings.length === 0) {
-        throw new Error("Could not find building data in the PDF. Try adding buildings manually.");
-      }
-
-      setBuildings(newBuildings);
-      setUploadStatus({
-        type: "success",
-        msg: `Extracted ${newBuildings.length} building${newBuildings.length > 1 ? "s" : ""} from ${file.name}. Review and adjust — especially pipes per building.`,
-      });
-    } catch (err) {
-      console.error("PDF extraction error:", err, "\nDebug:", debugInfo);
-      setUploadStatus({
-        type: "error",
-        msg: `Failed: ${err.message}`,
-        debug: debugInfo,
-      });
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleFile = (file) => {
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      setUploadStatus({ type: "error", msg: "Please upload a PDF file (Roofr aerial measurement report)." });
-      return;
-    }
-    extractFromPdf(file);
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer?.files?.[0];
-    handleFile(file);
-  };
-
-  const FIELDS = [
-    { key: "siteplanNum", label: "Site#", w: 55 },
-    { key: "phase", label: "Phase", w: 55 },
-    { key: "totalArea", label: "Total Area", w: 85 },
-    { key: "eaves", label: "Eaves", w: 70 },
-    { key: "valleys", label: "Valleys", w: 70 },
-    { key: "hips", label: "Hips", w: 70 },
-    { key: "ridges", label: "Ridges", w: 70 },
-    { key: "rakes", label: "Rakes", w: 70 },
-    { key: "stepFlashing", label: "Step Fl.", w: 70 },
-    { key: "wallFlashing", label: "Wall Fl.", w: 70 },
-    { key: "predominantPitch", label: "Pitch", w: 60 },
-    { key: "pipes", label: "Pipes", w: 55 },
-  ];
-
-  return (
-    <div>
-      <SectionTitle sub="Upload the Roofr aerial measurement report PDF to auto-extract building data">Building Measurements</SectionTitle>
-
-      {/* Upload Zone */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => !uploading && fileInputRef.current?.click()}
-        style={{
-          border: `2px dashed ${dragOver ? BRAND.red : uploading ? BRAND.gray300 : BRAND.navy}`,
-          borderRadius: 12,
-          padding: uploading ? "32px" : "40px",
-          textAlign: "center",
-          cursor: uploading ? "default" : "pointer",
-          background: dragOver ? "rgba(224,43,43,0.04)" : uploading ? BRAND.gray100 : BRAND.white,
-          marginBottom: 20,
-          transition: "all 0.2s",
-        }}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf"
-          style={{ display: "none" }}
-          onChange={(e) => handleFile(e.target.files?.[0])}
-        />
-        {uploading ? (
-          <div>
-            <div style={{ fontSize: 18, marginBottom: 8 }}>
-              <span style={{ display: "inline-block", animation: "spin 1s linear infinite", fontSize: 24 }}>⟳</span>
-            </div>
-            <div style={{ fontWeight: 600, color: BRAND.navy }}>Extracting measurements from {fileName}...</div>
-            <div style={{ fontSize: 13, color: BRAND.gray500, marginTop: 4 }}>Reading PDF and parsing building data</div>
-            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-          </div>
-        ) : (
-          <div>
-            <div style={{ fontSize: 36, marginBottom: 8, opacity: 0.3 }}>📄</div>
-            <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 15, marginBottom: 4 }}>
-              {fileName ? `Replace: ${fileName}` : "Upload Roofr Aerial Measurement Report"}
-            </div>
-            <div style={{ fontSize: 13, color: BRAND.gray500 }}>
-              Drop PDF here or click to browse — measurements will be extracted automatically
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Status Message */}
-      {uploadStatus && (
-        <div style={{
-          padding: "12px 16px",
-          borderRadius: 8,
-          marginBottom: 16,
-          fontSize: 13,
-          background: uploadStatus.type === "success" ? "#ecfdf5" : "#fef2f2",
-          color: uploadStatus.type === "success" ? "#065f46" : "#991b1b",
-          border: `1px solid ${uploadStatus.type === "success" ? "#a7f3d0" : "#fecaca"}`,
-        }}>
-          <div>{uploadStatus.type === "success" ? "✓ " : "✕ "}{uploadStatus.msg}</div>
-          {uploadStatus.type === "error" && (
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-              You can add buildings manually below, or try uploading again.
-            </div>
-          )}
-          {uploadStatus.debug && uploadStatus.type === "error" && (
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Debug Info (tap to expand)</summary>
-              <pre style={{ marginTop: 6, padding: 8, background: "#fff5f5", borderRadius: 4, fontSize: 10, whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 200, overflow: "auto" }}>
-                {uploadStatus.debug}
-              </pre>
-            </details>
-          )}
-        </div>
-      )}
-
-      {/* Editable Table */}
-      {buildings.length > 0 && (
-        <>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: BRAND.gray700 }}>
-              Review & Edit Extracted Data
-            </span>
-            <Btn small primary onClick={addBuilding}>+ Add Building</Btn>
-          </div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr>
-                  {FIELDS.map((f) => (
-                    <th key={f.key} style={{ padding: "8px 4px", background: BRAND.navy, color: BRAND.white, fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, textAlign: "left", whiteSpace: "nowrap" }}>
-                      {f.label}
-                    </th>
-                  ))}
-                  <th style={{ padding: "8px 4px", background: BRAND.navy, color: BRAND.white, fontWeight: 600, fontSize: 11, width: 40 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {buildings.map((bldg, i) => (
-                  <tr key={i} style={{ background: i % 2 ? BRAND.gray100 : BRAND.white }}>
-                    {FIELDS.map((f) => (
-                      <td key={f.key} style={{ padding: 2 }}>
-                        <input
-                          value={bldg[f.key]}
-                          onChange={upField(i, f.key)}
-                          type={f.key === "siteplanNum" || f.key === "predominantPitch" ? "text" : "number"}
-                          style={{
-                            width: f.w,
-                            padding: "6px 6px",
-                            border: `1px solid ${BRAND.gray200}`,
-                            borderRadius: 4,
-                            fontSize: 13,
-                            background: "transparent",
-                            fontFamily: "'SF Mono', 'Consolas', monospace",
-                          }}
-                        />
-                      </td>
-                    ))}
-                    <td style={{ padding: 2, textAlign: "center" }}>
-                      <button onClick={() => removeBuilding(i)} style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>×</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ marginTop: 12, padding: 12, background: BRAND.gray100, borderRadius: 8, display: "flex", gap: 24, fontSize: 13, color: BRAND.gray700 }}>
-            <span><strong>{buildings.length}</strong> buildings</span>
-            <span><strong>{buildings.reduce((s, b) => s + b.totalArea, 0).toLocaleString()}</strong> total sqft</span>
-            <span><strong>{fmtNum(buildings.reduce((s, b) => s + b.totalArea, 0) / 100, 1)}</strong> total squares</span>
-          </div>
-        </>
-      )}
-
-      {buildings.length === 0 && !uploading && (
-        <div style={{ textAlign: "center", padding: 24, color: BRAND.gray400, fontSize: 13 }}>
-          Upload a Roofr report above, or{" "}
-          <button onClick={addBuilding} style={{ background: "none", border: "none", color: BRAND.red, cursor: "pointer", fontWeight: 600, fontSize: 13, textDecoration: "underline" }}>
-            add buildings manually
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── STEP 3: PRICING CONFIG ────────────────────────────────────────
-function Step3({ materials, setMaterials, labor, setLabor, equipment, setEquipment, financials, setFinancials }) {
-  const upM = (k) => (e) => setMaterials((m) => ({ ...m, [k]: Number(e.target.value) || 0 }));
-  const upL = (k) => (e) => setLabor((l) => ({ ...l, [k]: Number(e.target.value) || 0 }));
-  const upE = (k) => (e) => setEquipment((eq) => ({ ...eq, [k]: typeof eq[k] === "boolean" ? e.target.checked : Number(e.target.value) || 0 }));
-  const upF = (k) => (e) => setFinancials((f) => ({ ...f, [k]: Number(e.target.value) || 0 }));
-
-  const MAT_ROWS = [
-    { label: "Architectural Shingles", priceKey: "shinglePrice", note: "Full roof · per BNDL" },
-    { label: "Hip & Ridge", priceKey: "hipRidgePrice", note: "Hips + Ridges · per BNDL" },
-    { label: "Starter Strip", priceKey: "starterPrice", note: "Rakes + Eaves · per BNDL" },
-    { label: "Synthetic Underlayment", priceKey: "underlaymentPrice", note: "Full roof · per ROLL" },
-    { label: "Ice & Water Shield", priceKey: "iceWaterPrice", note: "Valleys + Step · per ROLL" },
-    { label: "Ridge Vent", priceKey: "ridgeVentPrice", note: "All ridges · per EACH" },
-    { label: "Step Flashing", priceKey: "stepFlashingPrice", note: "Step flashing · per BOX" },
-    { label: "Drip Edge", priceKey: "dripEdgePrice", note: "Eaves + Rakes · per EACH" },
-    { label: "Coil Nails", priceKey: "coilNailPrice", note: "Full roof · per BOX" },
-    { label: "Cap Nails", priceKey: "capNailPrice", note: "Full roof · per BOX" },
-    { label: "Pipe Boots", priceKey: "pipeBootPrice", note: "Per pipe · EACH" },
-    { label: "Touch Paint", priceKey: "touchPaintPrice", note: "Per pipe · EACH" },
-    { label: "NP1 Sealant", priceKey: "np1Price", note: "Per pipe · EACH" },
-  ];
-
-  return (
-    <div>
-      <SectionTitle sub="Material unit prices, labor rates, and job-level costs">Pricing Configuration</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <Card>
-          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: BRAND.navy }}>Material Prices</h4>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {MAT_ROWS.map((r) => (
-              <div key={r.priceKey} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ flex: 1, fontSize: 13, color: BRAND.gray700 }}>{r.label}</span>
-                <span style={{ fontSize: 11, color: BRAND.gray400, width: 120, textAlign: "right" }}>{r.note}</span>
-                <div style={{ position: "relative", width: 90 }}>
-                  <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: BRAND.gray400 }}>$</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={materials[r.priceKey]}
-                    onChange={upM(r.priceKey)}
-                    style={{ width: "100%", padding: "5px 8px 5px 20px", border: `1px solid ${BRAND.gray200}`, borderRadius: 4, fontSize: 13, fontFamily: "'SF Mono', monospace", textAlign: "right" }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <div>
-          <Card>
-            <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: BRAND.navy }}>Labor</h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Tear-Off & Install" prefix="$" value={labor.tearOffRate} onChange={upL("tearOffRate")} type="number" suffix="/SQ" />
-              <Field label="OSB Labor" prefix="$" value={labor.osbLabor} onChange={upL("osbLabor")} type="number" suffix="/EA" />
-              <Field label="OSB Material" prefix="$" value={labor.osbMaterial} onChange={upL("osbMaterial")} type="number" suffix="/EA" />
-              <Field label="OSB Sheets Included" value={labor.osbSheets} onChange={upL("osbSheets")} type="number" />
-            </div>
-          </Card>
-          <Card>
-            <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: BRAND.navy }}>Equipment & Other</h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Forklift Cost" prefix="$" value={equipment.forkliftCost} onChange={upE("forkliftCost")} type="number" />
-              <Field label="Dumpster Cost" prefix="$" value={equipment.dumpsterCost} onChange={upE("dumpsterCost")} type="number" />
-              <Field label="Permit Cost" prefix="$" value={equipment.permitCost} onChange={upE("permitCost")} type="number" />
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="checkbox" checked={equipment.includePermit} onChange={upE("includePermit")} />
-                <span style={{ fontSize: 13 }}>Include Permit</span>
-              </div>
-              <Field label="Warranty $/SQ" prefix="$" value={equipment.warrantyPerSq} onChange={upE("warrantyPerSq")} type="number" />
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="checkbox" checked={equipment.extendedWarranty} onChange={upE("extendedWarranty")} />
-                <span style={{ fontSize: 13 }}>Extended Warranty</span>
-              </div>
-            </div>
-          </Card>
-          <Card>
-            <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: BRAND.navy }}>Financials</h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Margin" value={financials.margin} onChange={upF("margin")} type="number" suffix="(0.30 = 30%)" />
-              <Field label="Local Tax Rate" value={financials.taxRate} onChange={upF("taxRate")} type="number" suffix="(0.089 = 8.9%)" />
-            </div>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── STEP 4: PRICING REVIEW ───────────────────────────────────────
-function Step4({ results, buildings, financials }) {
-  if (!results.length) return <div style={{ padding: 40, textAlign: "center", color: BRAND.gray400 }}>No buildings to calculate.</div>;
-
-  const totalPrice = results.reduce((s, r) => s + r.totalPrice, 0);
-  const totalMat = results.reduce((s, r) => s + r.materialCost, 0);
-  const totalLabor = results.reduce((s, r) => s + r.laborCost, 0);
-  const totalTax = results.reduce((s, r) => s + r.materialTax, 0);
-  const totalMargin = results.reduce((s, r) => s + r.marginAmt, 0);
-
-  const phases = [...new Set(results.map((r) => r.phase))].sort((a, b) => a - b);
-
-  return (
-    <div>
-      <SectionTitle sub="Auto-calculated from measurements and pricing config">Pricing Review</SectionTitle>
-
-      {/* Summary Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 24 }}>
-        {[
-          { label: "Total Price", val: fmt(totalPrice), accent: BRAND.red },
-          { label: "Materials", val: fmt(totalMat) },
-          { label: "Labor/Equip", val: fmt(totalLabor) },
-          { label: "Tax", val: fmt(totalTax) },
-          { label: "Margin", val: fmt(totalMargin) },
-        ].map((c) => (
-          <div key={c.label} style={{ background: BRAND.white, border: `1px solid ${BRAND.gray200}`, borderRadius: 8, padding: 16, borderTop: `3px solid ${c.accent || BRAND.navy}` }}>
-            <div style={{ fontSize: 11, color: BRAND.gray500, textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.5 }}>{c.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: c.accent || BRAND.navy, marginTop: 4, fontFamily: "'SF Mono', monospace" }}>{c.val}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Per Building Table */}
-      <Card>
-        <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: BRAND.navy }}>By Building</h4>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: BRAND.navy }}>
-              {["Site#", "Phase", "Waste%", "Material", "Labor/Equip", "Tax", "Margin", "Total Price", "$/SQ (w/waste)"].map((h) => (
-                <th key={h} style={{ padding: "10px 8px", color: BRAND.white, fontWeight: 600, fontSize: 11, textTransform: "uppercase", textAlign: "right", letterSpacing: 0.3 }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {results.map((r, i) => (
-              <tr key={i} style={{ background: i % 2 ? BRAND.gray100 : BRAND.white, borderBottom: `1px solid ${BRAND.gray200}` }}>
-                <td style={{ padding: "8px", fontWeight: 600 }}>{r.siteplanNum}</td>
-                <td style={{ padding: "8px", textAlign: "right" }}>{r.phase}</td>
-                <td style={{ padding: "8px", textAlign: "right" }}>{pct(r.waste)}</td>
-                <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(r.materialCost)}</td>
-                <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(r.laborCost)}</td>
-                <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(r.materialTax)}</td>
-                <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(r.marginAmt)}</td>
-                <td style={{ padding: "8px", textAlign: "right", fontWeight: 700, fontFamily: "monospace" }}>{fmt(r.totalPrice)}</td>
-                <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(r.pricePerSq)}</td>
-              </tr>
-            ))}
-            <tr style={{ background: BRAND.navy, color: BRAND.white, fontWeight: 700 }}>
-              <td style={{ padding: "10px 8px" }} colSpan={3}>TOTALS</td>
-              <td style={{ padding: "10px 8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(totalMat)}</td>
-              <td style={{ padding: "10px 8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(totalLabor)}</td>
-              <td style={{ padding: "10px 8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(totalTax)}</td>
-              <td style={{ padding: "10px 8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(totalMargin)}</td>
-              <td style={{ padding: "10px 8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(totalPrice)}</td>
-              <td></td>
-            </tr>
-          </tbody>
-        </table>
-      </Card>
-
-      {/* Phase Summary */}
-      {phases.length > 1 && (
-        <Card>
-          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: BRAND.navy }}>By Phase</h4>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: BRAND.navy }}>
-                {["Phase", "Buildings", "Material", "Labor/Equip", "Tax", "Margin", "Total Price"].map((h) => (
-                  <th key={h} style={{ padding: "10px 8px", color: BRAND.white, fontWeight: 600, fontSize: 11, textTransform: "uppercase", textAlign: "right" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {phases.map((p, i) => {
-                const phaseResults = results.filter((r) => r.phase === p);
-                return (
-                  <tr key={p} style={{ background: i % 2 ? BRAND.gray100 : BRAND.white }}>
-                    <td style={{ padding: "8px", fontWeight: 600 }}>Phase {p}</td>
-                    <td style={{ padding: "8px", textAlign: "right" }}>{phaseResults.length}</td>
-                    <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(phaseResults.reduce((s, r) => s + r.materialCost, 0))}</td>
-                    <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(phaseResults.reduce((s, r) => s + r.laborCost, 0))}</td>
-                    <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(phaseResults.reduce((s, r) => s + r.materialTax, 0))}</td>
-                    <td style={{ padding: "8px", textAlign: "right", fontFamily: "monospace" }}>{fmt(phaseResults.reduce((s, r) => s + r.marginAmt, 0))}</td>
-                    <td style={{ padding: "8px", textAlign: "right", fontWeight: 700, fontFamily: "monospace" }}>{fmt(phaseResults.reduce((s, r) => s + r.totalPrice, 0))}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── STEP 5: PROPOSAL PREVIEW ─────────────────────────────────────
-function Step5({ project, results, buildings }) {
-  const market = MARKETS[project.market] || MARKETS.atlanta;
-  const totalPrice = results.reduce((s, r) => s + r.totalPrice, 0);
-  const proposalRef = useRef(null);
-
-  const handlePrint = () => {
-    const content = proposalRef.current;
-    if (!content) return;
-    const win = window.open("", "_blank");
-    win.document.write(`<!DOCTYPE html><html><head><title>${project.jobName} Proposal</title>
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', sans-serif; color: #1a2744; }
-        @page { size: letter; margin: 0.6in; }
-        .page-break { page-break-before: always; }
-        table { border-collapse: collapse; width: 100%; }
-      </style>
-    </head><body>${content.innerHTML}</body></html>`);
-    win.document.close();
-    setTimeout(() => { win.print(); }, 500);
-  };
-
-  const dateFormatted = project.date ? new Date(project.date + "T12:00:00").toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }) : "";
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <SectionTitle sub="Preview the final proposal. Print to PDF to save.">Proposal Preview</SectionTitle>
-        <Btn primary onClick={handlePrint}>Print / Save PDF</Btn>
-      </div>
-
-      <div ref={proposalRef}>
-        {/* ── PAGE 1: Cover ── */}
-        <div style={{ background: BRAND.white, border: `1px solid ${BRAND.gray200}`, borderRadius: 8, padding: 48, marginBottom: 16 }}>
-          <div style={{ background: BRAND.navy, color: BRAND.white, padding: "24px 32px", borderRadius: 8, textAlign: "center", marginBottom: 40 }}>
-            <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: 1 }}>COLONY ROOFERS</div>
-            <div style={{ fontSize: 14, marginTop: 4, opacity: 0.8 }}>{market.address}</div>
-          </div>
-
-          <div style={{ marginTop: 40, borderTop: `2px solid ${BRAND.gray200}`, paddingTop: 24, display: "flex", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 12, color: BRAND.gray400 }}>{dateFormatted}</div>
-              <h1 style={{ fontSize: 28, fontWeight: 700, color: BRAND.navy, margin: "8px 0 0" }}>{project.jobName || "Untitled"} Proposal</h1>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontWeight: 600 }}>{project.clientName}</div>
-              <div style={{ fontSize: 13, color: BRAND.gray500 }}>{project.clientEmail}</div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 60 }}>
-            <div style={{ fontWeight: 600 }}>{project.repName}</div>
-            <div style={{ fontSize: 13, color: BRAND.gray500 }}>{market.name}</div>
-            <div style={{ fontSize: 13, color: BRAND.gray500 }}>{project.repPhone}</div>
-            <div style={{ fontSize: 13, color: BRAND.gray500 }}>{project.repEmail}</div>
-          </div>
-        </div>
-
-        {/* ── PAGE 2: Scope of Work ── */}
-        <div className="page-break" style={{ background: BRAND.white, border: `1px solid ${BRAND.gray200}`, borderRadius: 8, padding: 48, marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24, paddingBottom: 16, borderBottom: `1px solid ${BRAND.gray200}` }}>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: BRAND.navy }}>COLONY ROOFERS</div>
-              <div style={{ fontSize: 12, color: BRAND.gray500 }}>{market.name}</div>
-              <div style={{ fontSize: 12, color: BRAND.gray500 }}>
-                <strong>Company Representative</strong><br />
-                {project.repName}<br />
-                Phone: {project.repPhone}<br />
-                {project.repEmail}
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 24, fontWeight: 700, color: BRAND.navy }}>{project.jobName}</div>
-              <div style={{ fontSize: 13, color: BRAND.gray500 }}>{dateFormatted}</div>
-              <div style={{ fontSize: 13, color: BRAND.gray500 }}>Claim Information</div>
-            </div>
-          </div>
-
-          <div style={{ border: `1px solid ${BRAND.gray200}`, padding: 16, borderRadius: 6, marginBottom: 24 }}>
-            <div style={{ fontWeight: 700 }}>{project.clientName}</div>
-            <div style={{ fontSize: 13 }}>{project.address}</div>
-            <div style={{ fontSize: 13 }}>{project.cityStateZip}</div>
-          </div>
-
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: BRAND.navy }}>Architectural Shingles</h3>
-
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>BASE BID:</div>
-            {SCOPE_ITEMS.map((item, i) => (
-              <div key={i} style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 16, position: "relative" }}>
-                <span style={{ position: "absolute", left: 0 }}>•</span>
-                {item}
-              </div>
-            ))}
-          </div>
-
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>UNIT COST(s):</div>
-            {UNIT_COSTS.map((item, i) => (
-              <div key={i} style={{ fontSize: 13, lineHeight: 1.7, paddingLeft: 16, position: "relative" }}>
-                <span style={{ position: "absolute", left: 0 }}>•</span>
-                {item}
-              </div>
-            ))}
-          </div>
-
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>EXCLUSIONS:</div>
-            <div style={{ fontSize: 13, paddingLeft: 16, position: "relative" }}>
-              <span style={{ position: "absolute", left: 0 }}>•</span>
-              {EXCLUSIONS}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 40, padding: "16px 0", borderTop: `2px solid ${BRAND.gray200}` }}>
-            <span style={{ fontSize: 16, fontWeight: 700 }}>TOTAL</span>
-            <span style={{ fontSize: 24, fontWeight: 700, color: BRAND.navy }}>{fmt(totalPrice)}</span>
-          </div>
-
-          <div style={{ marginTop: 40, display: "flex", flexDirection: "column", gap: 32 }}>
-            {["Company Authorized Signature", "Customer Signature", "Customer Signature"].map((label, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${BRAND.gray900}`, paddingBottom: 8 }}>
-                <span style={{ fontSize: 13 }}>{label}</span>
-                <span style={{ fontSize: 13 }}>Date</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── PAGE 3: Bulk Pricing Table ── */}
-        <div className="page-break" style={{ background: BRAND.white, border: `1px solid ${BRAND.gray200}`, borderRadius: 8, padding: 48, marginBottom: 16 }}>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: BRAND.navy }}>COLONY ROOFERS</div>
-            <div style={{ fontSize: 12, color: BRAND.gray500 }}>{project.companyName}</div>
-            <div style={{ fontSize: 12, color: BRAND.gray500 }}>{project.jobName}</div>
-            <div style={{ fontSize: 12, color: BRAND.gray500 }}>{dateFormatted}</div>
-          </div>
-
-          <div style={{ fontSize: 11, color: BRAND.gray500, fontStyle: "italic", marginBottom: 16 }}>
-            Note: This is a bulk price quote. If individual buildings chosen from this list for replacement, additional charges for equipment and mobilization costs may be assessed.
-          </div>
-
-          <div style={{ fontWeight: 700, marginBottom: 12, borderBottom: `2px solid ${BRAND.gray900}`, paddingBottom: 6, fontSize: 13 }}>
-            Bulk Cost Pricing by Building
-          </div>
-
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={{ padding: "6px 4px", textAlign: "left", fontWeight: 700, borderBottom: `1px solid ${BRAND.gray300}`, fontSize: 11 }}>Site Plan</th>
-                  {results.map((r, i) => (
-                    <th key={i} style={{ padding: "6px 4px", textAlign: "right", fontWeight: 700, borderBottom: `1px solid ${BRAND.gray300}`, fontSize: 11 }}>{r.siteplanNum}</th>
-                  ))}
-                  <th style={{ padding: "6px 4px", textAlign: "right", fontWeight: 700, borderBottom: `1px solid ${BRAND.gray300}`, fontSize: 11 }}>TOTAL PRICE</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td style={{ padding: "6px 4px", fontWeight: 600, fontSize: 11 }}>Total Price</td>
-                  {results.map((r, i) => (
-                    <td key={i} style={{ padding: "6px 4px", textAlign: "right", fontFamily: "monospace", fontSize: 11 }}>{fmt(r.totalPrice)}</td>
-                  ))}
-                  <td style={{ padding: "6px 4px", textAlign: "right", fontWeight: 700, fontFamily: "monospace", fontSize: 11 }}>{fmt(totalPrice)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "6px 4px", fontWeight: 600, fontSize: 11 }}>Price per Square with 15% Waste</td>
-                  {results.map((r, i) => (
-                    <td key={i} style={{ padding: "6px 4px", textAlign: "right", fontFamily: "monospace", fontSize: 11 }}>{fmtNum(r.pricePerSq, 2)}</td>
-                  ))}
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── FIRESTORE STORAGE HELPERS ──────────────────────────────────────
-async function saveSubmission(data) {
-  const id = data.id || "sub_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-  const record = {
-    ...data,
-    id,
-    updatedAt: new Date().toISOString(),
-    createdAt: data.createdAt || new Date().toISOString(),
-  };
-  try {
-    const fs = window._fbFs;
-    const docRef = fs.doc(firestoreDb, "submissions", id);
-    await fs.setDoc(docRef, record);
-    return record;
-  } catch (e) {
-    console.error("Save failed:", e);
-    return null;
-  }
-}
-
-async function loadAllSubmissions() {
-  try {
-    const fs = window._fbFs;
-    const colRef = fs.collection(firestoreDb, "submissions");
-    const q = fs.query(colRef, fs.orderBy("createdAt", "desc"));
-    const snapshot = await fs.getDocs(q);
-    const subs = [];
-    snapshot.forEach((doc) => subs.push(doc.data()));
-    return subs;
-  } catch (e) {
-    console.error("Load failed:", e);
-    return [];
-  }
-}
-
-async function deleteSubmission(id) {
-  try {
-    const fs = window._fbFs;
-    const docRef = fs.doc(firestoreDb, "submissions", id);
-    await fs.deleteDoc(docRef);
-    return true;
-  } catch (e) {
-    console.error("Delete failed:", e);
-    return false;
-  }
-}
-
-// ─── STATUS BADGE ──────────────────────────────────────────────────
-function StatusBadge({ status }) {
-  const styles = {
-    pending: { bg: "#fef3c7", color: "#92400e", label: "Pending Review" },
-    approved: { bg: "#d1fae5", color: "#065f46", label: "Approved" },
-    rejected: { bg: "#fee2e2", color: "#991b1b", label: "Rejected" },
-    draft: { bg: "#e5e7eb", color: "#374151", label: "Draft" },
-  };
-  const s = styles[status] || styles.pending;
-  return (
-    <span style={{
-      display: "inline-block", padding: "3px 10px", borderRadius: 12,
-      fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
-      background: s.bg, color: s.color,
-    }}>
-      {s.label}
-    </span>
-  );
-}
-
-// ─── SUBMISSIONS LIST ──────────────────────────────────────────────
-function SubmissionsList({ onLoad, onNew }) {
-  const [submissions, setSubmissions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("all");
-
-  const refresh = async () => {
-    setLoading(true);
-    const subs = await loadAllSubmissions();
-    setSubmissions(subs);
-    setLoading(false);
-  };
-
-  // Refresh on mount
-  const mountRef = useRef(false);
-  if (!mountRef.current) {
-    mountRef.current = true;
-    refresh();
-  }
-
-  const filtered = filter === "all" ? submissions : submissions.filter(s => s.status === filter);
-
-  const handleDelete = async (id, name) => {
-    if (confirm(`Delete submission "${name}"? This cannot be undone.`)) {
-      await deleteSubmission(id);
-      refresh();
-    }
-  };
-
-  const counts = {
-    all: submissions.length,
-    pending: submissions.filter(s => s.status === "pending").length,
-    approved: submissions.filter(s => s.status === "approved").length,
-    rejected: submissions.filter(s => s.status === "rejected").length,
-  };
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: BRAND.navy }}>Submissions</h2>
-          <p style={{ margin: "4px 0 0", fontSize: 13, color: BRAND.gray500 }}>All saved estimates — review, approve, or load for editing</p>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn small onClick={refresh}>Refresh</Btn>
-          <Btn small primary onClick={onNew}>+ New Estimate</Btn>
-        </div>
-      </div>
-
-      {/* Filter tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {[
-          { key: "all", label: "All" },
-          { key: "pending", label: "Pending" },
-          { key: "approved", label: "Approved" },
-          { key: "rejected", label: "Rejected" },
-        ].map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            style={{
-              padding: "6px 14px", borderRadius: 20, border: "none",
-              background: filter === f.key ? BRAND.navy : BRAND.gray100,
-              color: filter === f.key ? BRAND.white : BRAND.gray700,
-              fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-            }}
-          >
-            {f.label} ({counts[f.key]})
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div style={{ padding: 48, textAlign: "center", color: BRAND.gray400 }}>Loading submissions...</div>
-      ) : filtered.length === 0 ? (
-        <Card style={{ textAlign: "center", padding: 48 }}>
-          <div style={{ fontSize: 36, opacity: 0.2, marginBottom: 12 }}>📋</div>
-          <div style={{ color: BRAND.gray500 }}>
-            {submissions.length === 0
-              ? "No submissions yet. Create a new estimate to get started."
-              : `No ${filter} submissions found.`}
-          </div>
-        </Card>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {filtered.map((sub) => (
-            <div
-              key={sub.id}
-              style={{
-                background: BRAND.white, border: `1px solid ${BRAND.gray200}`, borderRadius: 10,
-                padding: "16px 20px", display: "flex", alignItems: "center", gap: 16,
-                cursor: "pointer", transition: "all 0.15s",
-              }}
-              onClick={() => onLoad(sub)}
-              onMouseOver={(e) => e.currentTarget.style.borderColor = BRAND.navy}
-              onMouseOut={(e) => e.currentTarget.style.borderColor = BRAND.gray200}
-            >
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                  <span style={{ fontWeight: 700, fontSize: 15, color: BRAND.navy }}>{sub.project?.jobName || "Untitled"}</span>
-                  <StatusBadge status={sub.status} />
-                </div>
-                <div style={{ fontSize: 12, color: BRAND.gray500, display: "flex", gap: 16 }}>
-                  <span>{sub.project?.companyName}</span>
-                  <span>{sub.project?.clientName}</span>
-                  <span>{MARKETS[sub.project?.market]?.name || "Unknown Market"}</span>
-                  <span>{sub.buildings?.length || 0} bldgs</span>
-                  <span>Submitted by {sub.submittedBy || "—"}</span>
-                </div>
-                {sub.reviewNotes && (
-                  <div style={{ fontSize: 12, color: BRAND.gray500, marginTop: 4, fontStyle: "italic" }}>
-                    Review: "{sub.reviewNotes.slice(0, 80)}{sub.reviewNotes.length > 80 ? "..." : ""}"
-                  </div>
-                )}
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontWeight: 700, fontSize: 18, fontFamily: "monospace", color: BRAND.navy }}>
-                  {fmt(sub.totalPrice || 0)}
-                </div>
-                <div style={{ fontSize: 11, color: BRAND.gray400 }}>
-                  {new Date(sub.createdAt).toLocaleDateString()}
-                </div>
-              </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDelete(sub.id, sub.project?.jobName); }}
-                style={{ background: "none", border: "none", color: BRAND.gray400, cursor: "pointer", fontSize: 18, padding: 4 }}
-                title="Delete"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── REVIEW PANEL (shown when viewing a loaded submission) ─────────
-function ReviewPanel({ submission, onSave, onBack }) {
-  const [status, setStatus] = useState(submission.status || "pending");
-  const [notes, setNotes] = useState(submission.reviewNotes || "");
-  const [reviewerName, setReviewerName] = useState(submission.reviewedBy || "");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const handleSaveReview = async () => {
-    setSaving(true);
-    const updated = {
-      ...submission,
-      status,
-      reviewNotes: notes,
-      reviewedBy: reviewerName,
-      reviewedAt: new Date().toISOString(),
-    };
-    const result = await saveSubmission(updated);
-    setSaving(false);
-    if (result) {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      if (onSave) onSave(result);
-    }
-  };
-
-  return (
-    <div style={{
-      background: status === "approved" ? "#f0fdf4" : status === "rejected" ? "#fef2f2" : "#fffbeb",
-      border: `1px solid ${status === "approved" ? "#bbf7d0" : status === "rejected" ? "#fecaca" : "#fde68a"}`,
-      borderRadius: 10, padding: 20, marginBottom: 20,
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: BRAND.navy }}>Estimator Review</h3>
-            <StatusBadge status={status} />
-          </div>
-          <div style={{ fontSize: 12, color: BRAND.gray500, marginBottom: 12 }}>
-            Submitted by {submission.submittedBy || "—"} on {new Date(submission.createdAt).toLocaleString()}
-            {submission.reviewedAt && ` • Reviewed by ${submission.reviewedBy} on ${new Date(submission.reviewedAt).toLocaleString()}`}
-          </div>
-        </div>
-        <Btn small onClick={onBack}>← Back to List</Btn>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div>
-          <label style={{ fontSize: 11, fontWeight: 600, color: BRAND.gray500, textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-            Status
-          </label>
-          <div style={{ display: "flex", gap: 6 }}>
-            {["pending", "approved", "rejected"].map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                style={{
-                  padding: "6px 14px", borderRadius: 6, border: `2px solid ${status === s ? BRAND.navy : BRAND.gray300}`,
-                  background: status === s ? BRAND.navy : BRAND.white, color: status === s ? BRAND.white : BRAND.gray700,
-                  fontSize: 12, fontWeight: 600, cursor: "pointer", textTransform: "capitalize", fontFamily: "inherit",
-                }}
-              >
-                {s === "pending" ? "Pending" : s === "approved" ? "Approve" : "Reject"}
-              </button>
-            ))}
-          </div>
-        </div>
-        <Field label="Reviewer Name" value={reviewerName} onChange={(e) => setReviewerName(e.target.value)} placeholder="Lead Estimator" />
-        <div style={{ display: "flex", alignItems: "flex-end" }}>
-          <Btn primary onClick={handleSaveReview} disabled={saving} style={{ width: "100%" }}>
-            {saving ? "Saving..." : saved ? "✓ Saved" : "Save Review"}
-          </Btn>
-        </div>
-      </div>
-
-      <div>
-        <label style={{ fontSize: 11, fontWeight: 600, color: BRAND.gray500, textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-          Review Notes
-        </label>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Add notes about pricing accuracy, adjustments needed, etc."
-          style={{
-            width: "100%", padding: 10, border: `1px solid ${BRAND.gray300}`, borderRadius: 6,
-            fontSize: 13, minHeight: 60, fontFamily: "inherit", resize: "vertical",
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ─── MAIN APP ──────────────────────────────────────────────────────
-const STEPS = ["Project Info", "Measurements", "Pricing", "Review", "Proposal"];
-
-function PricingTool({ user, onSignOut }) {
-  const [mode, setMode] = useState("submissions"); // "submissions" | "editor"
-  const [step, setStep] = useState(0);
-  const [loadedSubmission, setLoadedSubmission] = useState(null); // if editing a saved one
-  const [project, setProject] = useState({
-    jobName: "",
-    date: new Date().toISOString().split("T")[0],
-    clientName: "",
-    clientEmail: "",
-    address: "",
-    cityStateZip: "",
-    companyName: "",
-    market: "atlanta",
-    repName: "",
-    repEmail: "",
-    repPhone: "",
-  });
-  const [buildings, setBuildings] = useState([]);
-  const [materials, setMaterials] = useState({ ...DEFAULT_MATERIALS });
-  const [labor, setLabor] = useState({ ...DEFAULT_LABOR });
-  const [equipment, setEquipment] = useState({ ...DEFAULT_EQUIPMENT });
-  const [financials, setFinancials] = useState({ ...DEFAULT_FINANCIALS });
-  const [saveStatus, setSaveStatus] = useState(null);
-
-  const results = useMemo(
-    () => calcAllBuildings(buildings, materials, labor, equipment, financials),
-    [buildings, materials, labor, equipment, financials]
-  );
-
-  const totalPrice = results.reduce((s, r) => s + r.totalPrice, 0);
-
-  const canAdvance = Math.max(step, buildings.length > 0 ? 4 : project.jobName ? 1 : 0);
-
-  // Reset form for new estimate
-  const handleNew = () => {
-    setLoadedSubmission(null);
-    setProject({
-      jobName: "", date: new Date().toISOString().split("T")[0],
-      clientName: "", clientEmail: "", address: "", cityStateZip: "",
-      companyName: "", market: "atlanta", repName: "", repEmail: "", repPhone: "",
-    });
-    setBuildings([]);
-    setMaterials({ ...DEFAULT_MATERIALS });
-    setLabor({ ...DEFAULT_LABOR });
-    setEquipment({ ...DEFAULT_EQUIPMENT });
-    setFinancials({ ...DEFAULT_FINANCIALS });
-    setStep(0);
-    setMode("editor");
-    setSaveStatus(null);
-  };
-
-  // Load a submission into the editor
-  const handleLoad = (sub) => {
-    setLoadedSubmission(sub);
-    setProject(sub.project || {});
-    setBuildings(sub.buildings || []);
-    setMaterials(sub.materials || { ...DEFAULT_MATERIALS });
-    setLabor(sub.labor || { ...DEFAULT_LABOR });
-    setEquipment(sub.equipment || { ...DEFAULT_EQUIPMENT });
-    setFinancials(sub.financials || { ...DEFAULT_FINANCIALS });
-    setStep(3); // Go to Review step
-    setMode("editor");
-    setSaveStatus(null);
-  };
-
-  // Save current state as submission
-  const handleSave = async (status = "pending") => {
-    setSaveStatus("saving");
-    const submitterName = user?.name || project.repName || "Unknown";
-    const record = {
-      id: loadedSubmission?.id || undefined,
-      createdAt: loadedSubmission?.createdAt || undefined,
-      status: loadedSubmission?.status || status,
-      reviewNotes: loadedSubmission?.reviewNotes || "",
-      reviewedBy: loadedSubmission?.reviewedBy || "",
-      reviewedAt: loadedSubmission?.reviewedAt || "",
-      submittedBy: loadedSubmission?.submittedBy || submitterName,
-      project,
-      buildings,
-      materials,
-      labor,
-      equipment,
-      financials,
-      results,
-      totalPrice,
-    };
-    const saved = await saveSubmission(record);
-    if (saved) {
-      setLoadedSubmission(saved);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus(null), 3000);
-    } else {
-      setSaveStatus("error");
-    }
-  };
-
-  // Handle review save (update the loaded submission)
-  const handleReviewSave = (updated) => {
-    setLoadedSubmission(updated);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: BRAND.cream, fontFamily: "'Segoe UI', 'Inter', system-ui, sans-serif" }}>
-      {/* Header */}
-      <div style={{ background: BRAND.navy, padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ color: BRAND.white }}>
-            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 1.5 }}>COLONY ROOFERS</div>
-            <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 0.5, marginTop: 2 }}>SHINGLE REPLACEMENT PRICING TOOL</div>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {mode === "editor" && results.length > 0 && (
-            <div style={{ color: BRAND.white, textAlign: "right", marginRight: 12 }}>
-              <div style={{ fontSize: 11, opacity: 0.6 }}>TOTAL PRICE</div>
-              <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'SF Mono', monospace" }}>
-                {fmt(totalPrice)}
-              </div>
-            </div>
-          )}
-          {mode === "editor" && (
-            <button
-              onClick={() => setMode("submissions")}
-              style={{
-                padding: "8px 16px", background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)",
-                borderRadius: 6, color: BRAND.white, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-              }}
-            >
-              📋 Submissions
-            </button>
-          )}
-          {/* User info */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 8 }}>
-            {user?.picture ? (
-              <img src={user.picture} alt="" style={{ width: 30, height: 30, borderRadius: 15, border: "2px solid rgba(255,255,255,0.3)" }} referrerPolicy="no-referrer" />
-            ) : (
-              <div style={{ width: 30, height: 30, borderRadius: 15, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: BRAND.white }}>
-                {(user?.name || "?")[0]}
-              </div>
-            )}
-            <div style={{ color: BRAND.white, lineHeight: 1.2 }}>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>{user?.name}</div>
-              <button
-                onClick={onSignOut}
-                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", fontSize: 10, cursor: "pointer", padding: 0, fontFamily: "inherit" }}
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px 48px" }}>
-        {mode === "submissions" ? (
-          <div style={{ paddingTop: 24 }}>
-            <SubmissionsList onLoad={handleLoad} onNew={handleNew} />
-          </div>
-        ) : (
-          <>
-            <StepNav steps={STEPS} current={step} setCurrent={setStep} canAdvance={canAdvance} />
-
-            {/* Review Panel for loaded submissions */}
-            {loadedSubmission && (
-              <ReviewPanel
-                submission={loadedSubmission}
-                onSave={handleReviewSave}
-                onBack={() => setMode("submissions")}
-              />
-            )}
-
-            {step === 0 && <Step1 project={project} setProject={setProject} />}
-            {step === 1 && <Step2 buildings={buildings} setBuildings={setBuildings} />}
-            {step === 2 && <Step3 materials={materials} setMaterials={setMaterials} labor={labor} setLabor={setLabor} equipment={equipment} setEquipment={setEquipment} financials={financials} setFinancials={setFinancials} />}
-            {step === 3 && <Step4 results={results} buildings={buildings} financials={financials} />}
-            {step === 4 && <Step5 project={project} results={results} buildings={buildings} />}
-
-            {/* Navigation + Save */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 32 }}>
-              <Btn onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}>
-                ← Previous
-              </Btn>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {saveStatus === "saved" && (
-                  <span style={{ fontSize: 13, color: "#065f46", fontWeight: 600 }}>✓ Saved</span>
-                )}
-                {saveStatus === "error" && (
-                  <span style={{ fontSize: 13, color: "#991b1b", fontWeight: 600 }}>Save failed</span>
-                )}
-                {results.length > 0 && (
-                  <Btn
-                    onClick={() => handleSave("pending")}
-                    disabled={saveStatus === "saving"}
-                    style={{ background: "#065f46", color: BRAND.white, border: "none" }}
-                  >
-                    {saveStatus === "saving" ? "Saving..." : loadedSubmission ? "Save Changes" : "Save & Submit for Review"}
-                  </Btn>
-                )}
-                {step < STEPS.length - 1 && (
-                  <Btn primary onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}>
-                    Next →
-                  </Btn>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── ROOT APP WITH FIREBASE AUTH ───────────────────────────────────
-function App() {
-  const { user, loading, error, signIn, signOut } = useFirebaseAuth();
-
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-        background: "linear-gradient(135deg, #1a2744 0%, #2a3d66 100%)",
-        color: "rgba(255,255,255,0.6)", fontSize: 14, fontFamily: "'Segoe UI', system-ui, sans-serif",
-      }}>
-        Loading...
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LoginScreen onSignIn={signIn} loading={loading} error={error} />;
-  }
-
-  return <PricingTool user={user} onSignOut={signOut} />;
-}
-
-// ─── MOUNT ─────────────────────────────────────────────────────────
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(React.createElement(App));
-  </script>
-</body>
-</html>
-
 
     // ============================================================
-    // APP ROOT
+    // MODULE: PRODUCT CATALOG
+    // ============================================================
+    function ProductCatalogModule({ user, role }) {
+      const CATS = ["Shingles", "TPO/Membrane", "Underlayment", "Ice & Water", "Flashing", "Fasteners", "Sealants", "Accessories", "Equipment"];
+      const [products, setProducts] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("cr_product_catalog") || "[]"); } catch { return []; }
+      });
+      const [activeCat, setActiveCat] = useState("All");
+      const [showAdd, setShowAdd] = useState(false);
+      const [form, setForm] = useState({ name: "", manufacturer: "", sku: "", category: "Shingles", unit: "EACH", price: "", notes: "" });
+
+      useEffect(() => { try { localStorage.setItem("cr_product_catalog", JSON.stringify(products)); } catch {} }, [products]);
+
+      const filtered = activeCat === "All" ? products : products.filter(p => p.category === activeCat);
+
+      const handleAdd = () => {
+        if (!form.name) return;
+        setProducts(prev => [...prev, { ...form, id: generateId(), price: Number(form.price) || 0, dataSheet: null, createdAt: new Date().toISOString() }]);
+        setForm({ name: "", manufacturer: "", sku: "", category: "Shingles", unit: "EACH", price: "", notes: "" });
+        setShowAdd(false);
+      };
+
+      const handleDelete = (id) => { setProducts(prev => prev.filter(p => p.id !== id)); };
+
+      const handleDataSheetUpload = (productId, file) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setProducts(prev => prev.map(p => p.id === productId ? { ...p, dataSheet: { name: file.name, size: file.size, data: e.target.result } } : p));
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const fs = { width: "100%", padding: "8px 12px", border: `1px solid ${C.gray300}`, borderRadius: 6, fontSize: 13, color: C.navy, outline: "none" };
+      const ls = { fontSize: 11, fontWeight: 600, color: C.gray500, marginBottom: 3, display: "block", textTransform: "uppercase" };
+
+      return (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.navy }}>Product Catalog</h2>
+              <p style={{ margin: "4px 0 0", fontSize: 13, color: C.gray500 }}>Master product list with data sheets — used for estimates and submittal packages</p>
+            </div>
+            <button onClick={() => setShowAdd(!showAdd)} style={{ padding: "8px 16px", borderRadius: 6, border: "none", background: C.red, color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>+ Add Product</button>
+          </div>
+
+          {/* Category filter */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
+            <button onClick={() => setActiveCat("All")} style={{ padding: "6px 12px", borderRadius: 20, border: "none", background: activeCat === "All" ? C.navy : C.gray100, color: activeCat === "All" ? C.white : C.gray700, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>All ({products.length})</button>
+            {CATS.map(cat => {
+              const count = products.filter(p => p.category === cat).length;
+              return (
+                <button key={cat} onClick={() => setActiveCat(cat)} style={{ padding: "6px 12px", borderRadius: 20, border: "none", background: activeCat === cat ? C.navy : C.gray100, color: activeCat === cat ? C.white : C.gray700, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{cat} ({count})</button>
+              );
+            })}
+          </div>
+
+          {/* Add Product Form */}
+          {showAdd && (
+            <div style={{ padding: 20, borderRadius: 10, border: `1px solid ${C.red}40`, background: C.white, marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, fontWeight: 700, color: C.navy, margin: "0 0 12px" }}>Add Product</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <div><label style={ls}>Product Name</label><input style={fs} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="GAF Timberline HDZ" /></div>
+                <div><label style={ls}>Manufacturer</label><input style={fs} value={form.manufacturer} onChange={e => setForm(f => ({ ...f, manufacturer: e.target.value }))} placeholder="GAF" /></div>
+                <div><label style={ls}>Category</label><select style={fs} value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>{CATS.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                <div><label style={ls}>Unit Price</label><input style={fs} type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} placeholder="0.00" /></div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 12, marginBottom: 12 }}>
+                <div><label style={ls}>SKU</label><input style={fs} value={form.sku} onChange={e => setForm(f => ({ ...f, sku: e.target.value }))} /></div>
+                <div><label style={ls}>Unit</label><input style={fs} value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} placeholder="BNDL, ROLL, EACH" /></div>
+                <div><label style={ls}>Notes</label><input style={fs} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => setShowAdd(false)} style={{ padding: "8px 16px", borderRadius: 6, border: `1px solid ${C.gray300}`, background: C.white, color: C.gray600, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                <button onClick={handleAdd} disabled={!form.name} style={{ padding: "8px 16px", borderRadius: 6, border: "none", background: form.name ? C.green : C.gray300, color: form.name ? C.white : C.gray400, fontSize: 12, fontWeight: 600, cursor: form.name ? "pointer" : "default" }}>Add Product</button>
+              </div>
+            </div>
+          )}
+
+          {/* Product List */}
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 48, background: C.white, borderRadius: 10, border: `2px dashed ${C.gray300}` }}>
+              <div style={{ fontSize: 36, opacity: 0.2, marginBottom: 12 }}>📦</div>
+              <p style={{ fontSize: 13, color: C.gray400 }}>No products yet. Add products to build your catalog for estimates and submittal packages.</p>
+            </div>
+          ) : (
+            <div style={{ borderRadius: 10, border: `1px solid ${C.gray200}`, overflow: "hidden", background: C.white }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: C.gray50 }}>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Product</th>
+                  <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Manufacturer</th>
+                  <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Category</th>
+                  <th style={{ padding: "10px 8px", textAlign: "right", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Price</th>
+                  <th style={{ padding: "10px 8px", textAlign: "center", fontSize: 10, fontWeight: 700, color: C.gray400, textTransform: "uppercase" }}>Data Sheet</th>
+                  <th style={{ width: 32 }}></th>
+                </tr></thead>
+                <tbody>
+                  {filtered.map(p => (
+                    <tr key={p.id} style={{ borderTop: `1px solid ${C.gray100}` }}>
+                      <td style={{ padding: "10px 12px" }}>
+                        <div style={{ fontWeight: 600, color: C.navy }}>{p.name}</div>
+                        {p.sku && <div style={{ fontSize: 10, color: C.gray400 }}>SKU: {p.sku}</div>}
+                      </td>
+                      <td style={{ padding: "10px 8px", color: C.gray600 }}>{p.manufacturer}</td>
+                      <td style={{ padding: "10px 8px" }}><span style={{ padding: "2px 8px", borderRadius: 4, background: C.gray100, color: C.gray600, fontSize: 11, fontWeight: 600 }}>{p.category}</span></td>
+                      <td style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, color: C.navy }}>{fmt(p.price || 0)}/{p.unit}</td>
+                      <td style={{ padding: "10px 8px", textAlign: "center" }}>
+                        {p.dataSheet ? (
+                          <span style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>✓ {p.dataSheet.name}</span>
+                        ) : (
+                          <label style={{ fontSize: 11, color: C.blue, fontWeight: 600, cursor: "pointer" }}>
+                            + Upload
+                            <input type="file" accept=".pdf" style={{ display: "none" }} onChange={e => e.target.files?.[0] && handleDataSheetUpload(p.id, e.target.files[0])} />
+                          </label>
+                        )}
+                      </td>
+                      <td style={{ padding: "10px 4px" }}>
+                        <button onClick={() => handleDelete(p.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.gray400, fontSize: 14 }}>×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // MAIN APP SHELL
     // ============================================================
     function App() {
-      const [user, setUser] = useState(null);
-      return user ? <Dashboard user={user} onLogout={() => setUser(null)} /> : <LoginScreen onLogin={setUser} />;
+      const { user, loading, error, signIn, signOut } = useFirebaseAuth();
+      const [activeModule, setActiveModule] = useState(null);
+
+      if (loading) {
+        return (
+          <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${C.navyDark}, ${C.navyLight})`, color: "rgba(255,255,255,0.6)", fontSize: 14 }}>
+            <Spinner size={24} color="rgba(255,255,255,0.5)" />
+          </div>
+        );
+      }
+
+      if (!user) return <LoginScreen onSignIn={signIn} loading={loading} error={error} />;
+
+      const role = getUserRole(user.email);
+      const allowedModules = ROLES[role]?.modules || [];
+
+      // Default to first allowed module
+      const currentModule = activeModule && allowedModules.includes(activeModule) ? activeModule : allowedModules[0] || "production";
+
+      const modules = [
+        { key: "estimating", label: "Estimating", icon: "📐" },
+        { key: "production", label: "Production", icon: "🏗️" },
+        { key: "catalog", label: "Catalog", icon: "📦" },
+      ].filter(m => allowedModules.includes(m.key));
+
+      return (
+        <div style={{ minHeight: "100vh", background: C.gray50 }}>
+          {/* Header */}
+          <div style={{ background: C.navy, padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+              <div style={{ color: C.white, display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: C.red, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: C.white }}>CR</div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5 }}>Colony Roofers</div>
+                  <div style={{ fontSize: 9, opacity: 0.5, letterSpacing: "0.1em", textTransform: "uppercase" }}>Large Projects</div>
+                </div>
+              </div>
+              {/* Module tabs */}
+              <div style={{ display: "flex", gap: 2, marginLeft: 16 }}>
+                {modules.map(m => (
+                  <button key={m.key} onClick={() => setActiveModule(m.key)} style={{
+                    padding: "8px 18px", border: "none", borderRadius: "6px 6px 0 0",
+                    background: currentModule === m.key ? "rgba(255,255,255,0.15)" : "transparent",
+                    color: currentModule === m.key ? C.white : "rgba(255,255,255,0.5)",
+                    fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                    borderBottom: currentModule === m.key ? `2px solid ${C.red}` : "2px solid transparent",
+                  }}>
+                    <span style={{ fontSize: 14 }}>{m.icon}</span> {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ padding: "3px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700, textTransform: "uppercase", background: ROLES[role]?.color + "30", color: ROLES[role]?.color || C.white, letterSpacing: "0.05em" }}>{ROLES[role]?.label || role}</span>
+              {user.picture ? (
+                <img src={user.picture} alt="" style={{ width: 28, height: 28, borderRadius: 14, border: "2px solid rgba(255,255,255,0.3)" }} referrerPolicy="no-referrer" />
+              ) : (
+                <div style={{ width: 28, height: 28, borderRadius: 14, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: C.white, fontWeight: 700 }}>{(user.name || "?")[0]}</div>
+              )}
+              <div style={{ color: C.white, lineHeight: 1.2 }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{user.name}</div>
+                <button onClick={signOut} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", fontSize: 10, cursor: "pointer", padding: 0 }}>Sign Out</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Module Content */}
+          {currentModule === "estimating" && <EstimatingModule user={user} role={role} />}
+          {currentModule === "production" && <ProductionModule user={user} role={role} />}
+          {currentModule === "catalog" && <ProductCatalogModule user={user} role={role} />}
+        </div>
+      );
     }
 
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
