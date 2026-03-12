@@ -9,6 +9,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.9/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -482,7 +484,25 @@
       const uploadedCount = allDocs().length;
       const canProcess = uploadedCount >= 1;
 
-      const docToContentParts = (label, doc) => {
+      // Extract text from PDF using pdf.js
+      const extractPdfText = async (base64Data) => {
+        try {
+          const binaryStr = atob(base64Data);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+          const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+          let fullText = "";
+          for (let p = 1; p <= pdf.numPages; p++) {
+            const page = await pdf.getPage(p);
+            const tc = await page.getTextContent();
+            fullText += "=== Page " + p + " ===\n" + tc.items.map(i => i.str).join(" ") + "\n\n";
+          }
+          if (fullText.length > 60000) fullText = fullText.substring(0, 60000) + "\n...[truncated]";
+          return fullText;
+        } catch (e) { return "[Could not extract PDF text: " + e.message + "]"; }
+      };
+
+      const docToContentParts = async (label, doc) => {
         const parts = [];
         const base64Data = doc.data.split(",")[1];
         const mediaType = doc.type || "application/pdf";
@@ -502,8 +522,14 @@
           parts.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } });
           parts.push({ type: "text", text: "[Image: " + label + " \"" + doc.name + "\"]" });
         } else if (mediaType === "application/pdf") {
-          parts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Data } });
-          parts.push({ type: "text", text: "[PDF: " + label + " \"" + doc.name + "\"]" });
+          // PDFs > 2MB: extract text client-side to avoid Netlify payload limits
+          if (doc.size > 2000000) {
+            const pdfText = await extractPdfText(base64Data);
+            parts.push({ type: "text", text: "[" + label + ": \"" + doc.name + "\" \u2014 PDF text extracted]\n\n" + pdfText });
+          } else {
+            parts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Data } });
+            parts.push({ type: "text", text: "[PDF: " + label + " \"" + doc.name + "\"]" });
+          }
         } else {
           parts.push({ type: "text", text: "[" + label + ": \"" + doc.name + "\" \u2014 unsupported format]" });
         }
@@ -518,22 +544,24 @@
         }));
       };
 
-      // Batch documents by size (~4MB base64 per batch)
+      // Batch documents by size (~2MB per batch to stay under Netlify limits)
       const buildBatches = () => {
-        const MAX_BATCH_BYTES = 4 * 1024 * 1024;
+        const MAX_BATCH_BYTES = 2 * 1024 * 1024;
         const all = allDocs();
         const batches = [];
         let currentBatch = [];
         let currentSize = 0;
         for (const item of all) {
           const docSize = item.doc.size || 0;
-          if (currentBatch.length > 0 && currentSize + docSize > MAX_BATCH_BYTES) {
+          // Large PDFs get text-extracted so they're much smaller — treat as 50KB
+          const effectiveSize = (item.doc.type === "application/pdf" && docSize > 2000000) ? 50000 : docSize;
+          if (currentBatch.length > 0 && currentSize + effectiveSize > MAX_BATCH_BYTES) {
             batches.push(currentBatch);
             currentBatch = [];
             currentSize = 0;
           }
           currentBatch.push(item);
-          currentSize += docSize;
+          currentSize += effectiveSize;
         }
         if (currentBatch.length > 0) batches.push(currentBatch);
         return batches;
@@ -544,7 +572,8 @@
       const processBatch = async (batch) => {
         const contentParts = [];
         for (const { type, doc } of batch) {
-          contentParts.push(...docToContentParts(DOC_TYPES[type]?.label || type, doc));
+          const parts = await docToContentParts(DOC_TYPES[type]?.label || type, doc);
+          contentParts.push(...parts);
         }
         contentParts.push({ type: "text", text: EXTRACT_PROMPT });
         const response = await fetch("/api/ai", {
