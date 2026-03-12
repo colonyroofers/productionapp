@@ -1,20 +1,37 @@
-// netlify/functions/config.js
-// Serves Firebase config from environment variables (not in source code)
+// netlify/functions/ai.js — Anthropic API proxy
+const handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+  }
 
-exports.handler = async (event) => {
-  return {
-    statusCode: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
-    body: JSON.stringify({
-      apiKey: process.env.FIREBASE_API_KEY || "",
-      authDomain: process.env.FIREBASE_AUTH_DOMAIN || "",
-      projectId: process.env.FIREBASE_PROJECT_ID || "",
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "",
-      messagingSenderId: process.env.FIREBASE_MESSAGING_ID || "",
-      appId: process.env.FIREBASE_APP_ID || "",
-    }),
-  };
+  try {
+    const body = JSON.parse(event.body);
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+    return {
+      statusCode: response.status,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: JSON.stringify(data),
+    };
+  } catch (err) {
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ error: { message: err.message } }),
+    };
+  }
 };
+
+module.exports = { handler };
